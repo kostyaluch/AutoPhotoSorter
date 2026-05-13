@@ -515,7 +515,7 @@ class AutoPhotoSorterApp:
 def _open_file(path: str) -> None:
     """Відкриває файл у системній програмі за замовчуванням."""
     try:
-        if sys.platform.startswith("win"):
+        if hasattr(os, "startfile"):  # Windows only
             os.startfile(path)  # type: ignore[attr-defined]
         elif sys.platform.startswith("darwin"):
             subprocess.call(["open", path])

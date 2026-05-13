@@ -228,8 +228,10 @@ def rename_images_in_folder(folder_path: str,
     # Відбираємо лише валідні зображення (без помилок)
     valid = [img for img in sorted_images if not img.get("error")]
 
-    # Обмеження: перейменовуємо не більше 99 файлів
-    valid = valid[:99]
+    # Максимальна кількість файлів визначається двозначною схемою іменування:
+    # 01.jpg … 99.jpg → не більше 99 позицій.
+    MAX_FILES = 99
+    valid = valid[:MAX_FILES]
 
     for idx, img_data in enumerate(valid, start=1):
         old_path = img_data["path"]
