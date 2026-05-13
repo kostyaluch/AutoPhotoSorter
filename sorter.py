@@ -16,11 +16,13 @@ import logging
 
 from analyzer import (
     analyze_image,
+    rank_images_with_ollama,
     CATEGORY_ORDER,
     CATEGORY_MAIN,
     CATEGORY_PACKSHOT,
     DEFAULT_OLLAMA_MODEL,
     IMAGE_EXTENSIONS,
+    OLLAMA_MAX_IMAGES_PER_RANK,
 )
 
 logger = logging.getLogger(__name__)
@@ -149,6 +151,7 @@ def process_folder(folder_path: str,
         "fallback_used": False,
         "fallback_image": None,
         "renamed_files": [],
+        "ollama_ranked": False,
         "error": None,
     }
 
@@ -202,6 +205,43 @@ def process_folder(folder_path: str,
                 ]
                 sorted_images.insert(0, fallback)
                 result["sorted_images"] = sorted_images
+
+        # --- Ollama folder-level ranking (overrides category-based sort) ---
+        # When Ollama is selected, send all images together so the model can
+        # evaluate the full product set and decide the optimal display order.
+        if api_type == "ollama" and ollama_url:
+            n = len(images_data)
+            if 2 <= n <= OLLAMA_MAX_IMAGES_PER_RANK:
+                if progress_callback:
+                    progress_callback(
+                        n, n,
+                        f"Ollama: ранжування {n} фото разом…"
+                    )
+                all_paths = [img["path"] for img in images_data]
+                rank_order = rank_images_with_ollama(
+                    all_paths, ollama_url, ollama_model
+                )
+                if rank_order is not None:
+                    result["sorted_images"] = [images_data[i] for i in rank_order]
+                    result["ollama_ranked"] = True
+                    logger.info(
+                        "process_folder(%s): Ollama ранжування застосовано",
+                        os.path.basename(folder_path),
+                    )
+                else:
+                    logger.info(
+                        "process_folder(%s): Ollama ранжування не вдалося — "
+                        "використовується стандартне сортування за категоріями",
+                        os.path.basename(folder_path),
+                    )
+            elif n > OLLAMA_MAX_IMAGES_PER_RANK:
+                logger.warning(
+                    "process_folder(%s): %d зображень перевищує ліміт "
+                    "ранжування Ollama (%d) — використовується стандартне сортування",
+                    os.path.basename(folder_path),
+                    n,
+                    OLLAMA_MAX_IMAGES_PER_RANK,
+                )
 
     except Exception as exc:
         result["error"] = str(exc)

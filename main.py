@@ -17,7 +17,7 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
-from analyzer import DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL
+from analyzer import DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL, OLLAMA_MAX_IMAGES_PER_RANK
 from sorter import find_subfolders_with_images, get_images_in_folder, rename_images_in_folder, process_folder
 from reporter import generate_report
 
@@ -53,8 +53,10 @@ _API_HINTS = {
     "gemini": "💡 Потрібен Google Gemini API ключ: https://aistudio.google.com/app/apikey\nУвага: ключ буде видимий в полі вводу.",
     "openai": "💡 Потрібен OpenAI API ключ: https://platform.openai.com/api-keys\nУвага: ключ буде видимий в полі вводу.",
     "ollama": (
-        f"💡 Ollama: локальний сервер з моделями. URL за замовчуванням: {DEFAULT_OLLAMA_URL}\n"
-        "Для фото використовуйте vision-модель і назву точно з 'ollama list'."
+        f"💡 Ollama: локальний сервер з vision-моделями. URL за замовчуванням: {DEFAULT_OLLAMA_URL}\n"
+        "Для фото використовуйте vision-модель (llava, bakllava) і назву точно з 'ollama list'.\n"
+        f"✨ Новинка: Ollama аналізує всі фото товару разом (до {OLLAMA_MAX_IMAGES_PER_RANK} шт.) "
+        "і сама визначає оптимальний порядок зображень у папці."
     ),
     "clip": (
         "💡 CLIP: локальна модель (~350 MB), завантажується при першому запуску. "
@@ -496,6 +498,12 @@ class AutoPhotoSorterApp:
                         f"   ⚠️  Головне фото не знайдено. Альтернатива: "
                         f"{fb.get('filename', 'N/A')}",
                         "warning",
+                    )
+
+                if result.get("ollama_ranked"):
+                    self._log(
+                        "   ✅  Порядок фото визначено Ollama (ранжування набору)",
+                        "success",
                     )
 
                 # --- Перейменування ---
