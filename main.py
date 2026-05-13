@@ -49,8 +49,8 @@ _API_TYPE_OPTIONS = [
 
 _API_HINTS = {
     "none": "💡 Лише OpenCV: визначає білий фон. Без AI класифікації типу контенту.",
-    "gemini": "💡 Потрібен Google Gemini API ключ: https://aistudio.google.com/app/apikey",
-    "openai": "💡 Потрібен OpenAI API ключ: https://platform.openai.com/api-keys",
+    "gemini": "💡 Потрібен Google Gemini API ключ: https://aistudio.google.com/app/apikey\nУвага: ключ буде видимий в полі вводу.",
+    "openai": "💡 Потрібен OpenAI API ключ: https://platform.openai.com/api-keys\nУвага: ключ буде видимий в полі вводу.",
     "ollama": "💡 Ollama: локальний сервер з моделями (llava, bakllava). URL за замовчуванням: http://localhost:11434",
     "clip": (
         "💡 CLIP: локальна модель (~350 MB), завантажується при першому запуску. "

@@ -308,22 +308,28 @@ def classify_with_openai(image_path: str, api_key: str) -> str | None:
 # 6. Класифікація через Ollama (локальні моделі, наприклад Gemma)
 # ---------------------------------------------------------------------------
 
-def classify_with_ollama(image_path: str, ollama_url: str, model_name: str = "llava") -> str | None:
+def classify_with_ollama(image_path: str, ollama_url: str | None, model_name: str = "llava") -> str | None:
     """
     Класифікує зображення через Ollama (локальні моделі).
 
     Налаштування:
       ollama_url — URL Ollama API (наприклад, http://localhost:11434)
-      model_name — назва моделі в Ollama (наприклад, "llava", "gemma", "bakllava")
+      model_name — назва моделі в Ollama з підтримкою зображень
+                   (наприклад, "llava", "bakllava")
 
-    Для використання моделі Gemma з візуальними можливостями рекомендується
-    використати llava або bakllava, оскільки чиста Gemma не підтримує зображення.
+    Примітка: Модель повинна підтримувати обробку зображень.
+    Моделі тільки для тексту (як чиста Gemma) не підійдуть.
 
     Повертає рядок категорії або None при помилці.
     """
     if not REQUESTS_AVAILABLE:
         logger.error("requests не встановлено. Виконайте: pip install requests")
         return None
+    
+    if not ollama_url:
+        logger.error("Ollama URL не вказано")
+        return None
+    
     try:
         img_b64 = _encode_image_base64(image_path)
         if not img_b64:
@@ -347,8 +353,17 @@ def classify_with_ollama(image_path: str, ollama_url: str, model_name: str = "ll
         response_text = result.get("response", "")
         
         return _parse_ai_response(response_text)
+    except requests.exceptions.ConnectionError as exc:
+        logger.warning(f"classify_with_ollama: Не вдалося підключитися до Ollama ({ollama_url}): {exc}")
+        return None
+    except requests.exceptions.Timeout as exc:
+        logger.warning(f"classify_with_ollama: Час очікування вичерпано ({ollama_url}): {exc}")
+        return None
+    except requests.exceptions.HTTPError as exc:
+        logger.warning(f"classify_with_ollama: HTTP помилка ({ollama_url}): {exc}")
+        return None
     except Exception as exc:
-        logger.warning("classify_with_ollama: %s", exc)
+        logger.warning(f"classify_with_ollama: {exc}")
         return None
 
 
