@@ -60,6 +60,13 @@ except (ImportError, Exception):
     CLIP_AVAILABLE = False
     logger.info("torch/CLIP не встановлено — локальна CLIP модель недоступна.")
 
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+    logger.info("requests не встановлено — Ollama API недоступний.")
+
 # ---------------------------------------------------------------------------
 # Константи категорій (порядок — пріоритет сортування)
 # ---------------------------------------------------------------------------
@@ -298,7 +305,55 @@ def classify_with_openai(image_path: str, api_key: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# 6. Класифікація через локальну CLIP модель
+# 6. Класифікація через Ollama (локальні моделі, наприклад Gemma)
+# ---------------------------------------------------------------------------
+
+def classify_with_ollama(image_path: str, ollama_url: str, model_name: str = "llava") -> str | None:
+    """
+    Класифікує зображення через Ollama (локальні моделі).
+
+    Налаштування:
+      ollama_url — URL Ollama API (наприклад, http://localhost:11434)
+      model_name — назва моделі в Ollama (наприклад, "llava", "gemma", "bakllava")
+
+    Для використання моделі Gemma з візуальними можливостями рекомендується
+    використати llava або bakllava, оскільки чиста Gemma не підтримує зображення.
+
+    Повертає рядок категорії або None при помилці.
+    """
+    if not REQUESTS_AVAILABLE:
+        logger.error("requests не встановлено. Виконайте: pip install requests")
+        return None
+    try:
+        img_b64 = _encode_image_base64(image_path)
+        if not img_b64:
+            return None
+
+        # Видаляємо trailing slash з URL
+        ollama_url = ollama_url.rstrip('/')
+        endpoint = f"{ollama_url}/api/generate"
+        
+        payload = {
+            "model": model_name,
+            "prompt": _CLASSIFY_PROMPT,
+            "images": [img_b64],
+            "stream": False
+        }
+        
+        response = requests.post(endpoint, json=payload, timeout=60)
+        response.raise_for_status()
+        
+        result = response.json()
+        response_text = result.get("response", "")
+        
+        return _parse_ai_response(response_text)
+    except Exception as exc:
+        logger.warning("classify_with_ollama: %s", exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# 7. Класифікація через локальну CLIP модель
 # ---------------------------------------------------------------------------
 
 _CLIP_MODEL_CACHE: dict = {}  # {device: (model, preprocess)}
@@ -357,6 +412,8 @@ def classify_with_clip(image_path: str) -> str | None:
 def classify_image(image_path: str,
                    api_type: str = "none",
                    api_key: str | None = None,
+                   ollama_url: str | None = None,
+                   ollama_model: str = "llava",
                    white_bg_score: float = 0.0,
                    has_text: bool = False,
                    detected_text: str = "") -> tuple[str, float, str]:
@@ -364,8 +421,10 @@ def classify_image(image_path: str,
     Визначає категорію зображення.
 
     Параметри:
-      api_type — метод аналізу: 'gemini' | 'openai' | 'clip' | 'none'
+      api_type — метод аналізу: 'gemini' | 'openai' | 'ollama' | 'clip' | 'none'
       api_key  — API ключ (для gemini/openai)
+      ollama_url — URL Ollama API (для ollama)
+      ollama_model — назва моделі в Ollama (для ollama)
       white_bg_score, has_text, detected_text — результати OpenCV/OCR аналізу
 
     Повертає (category, confidence, method_used).
@@ -382,6 +441,10 @@ def classify_image(image_path: str,
         ai_category = classify_with_openai(image_path, api_key)
         if ai_category:
             method = "openai"
+    elif api_type == "ollama" and ollama_url:
+        ai_category = classify_with_ollama(image_path, ollama_url, ollama_model)
+        if ai_category:
+            method = f"ollama:{ollama_model}"
     elif api_type == "clip":
         ai_category = classify_with_clip(image_path)
         if ai_category:
@@ -427,7 +490,9 @@ def classify_image(image_path: str,
 
 def analyze_image(image_path: str,
                   api_type: str = "none",
-                  api_key: str | None = None) -> dict:
+                  api_key: str | None = None,
+                  ollama_url: str | None = None,
+                  ollama_model: str = "llava") -> dict:
     """
     Виконує повний аналіз зображення і повертає словник з результатами.
 
@@ -468,6 +533,8 @@ def analyze_image(image_path: str,
             image_path,
             api_type=api_type,
             api_key=api_key,
+            ollama_url=ollama_url,
+            ollama_model=ollama_model,
             white_bg_score=result["white_bg_score"],
             has_text=result["has_text"],
             detected_text=result["detected_text"],

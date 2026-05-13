@@ -116,14 +116,18 @@ def find_best_fallback(images_data: list[dict]) -> dict | None:
 def process_folder(folder_path: str,
                    api_type: str = "none",
                    api_key: str | None = None,
+                   ollama_url: str | None = None,
+                   ollama_model: str = "llava",
                    progress_callback=None) -> dict:
     """
     Аналізує та сортує всі зображення в папці.
 
     Параметри:
       folder_path       — шлях до папки з зображеннями
-      api_type          — метод AI: 'gemini' | 'openai' | 'clip' | 'none'
+      api_type          — метод AI: 'gemini' | 'openai' | 'ollama' | 'clip' | 'none'
       api_key           — API ключ (для gemini/openai)
+      ollama_url        — URL Ollama API (для ollama)
+      ollama_model      — назва моделі в Ollama (для ollama)
       progress_callback — функція(current, total, message) для відображення прогресу
 
     Результат (dict):
@@ -160,7 +164,8 @@ def process_folder(folder_path: str,
             if progress_callback:
                 progress_callback(i, len(images),
                                   f"Аналіз: {os.path.basename(img_path)}")
-            img_data = analyze_image(img_path, api_type=api_type, api_key=api_key)
+            img_data = analyze_image(img_path, api_type=api_type, api_key=api_key, 
+                                    ollama_url=ollama_url, ollama_model=ollama_model)
             images_data.append(img_data)
 
         # --- Сортування ---
