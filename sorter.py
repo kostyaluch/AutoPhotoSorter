@@ -19,6 +19,7 @@ from analyzer import (
     CATEGORY_ORDER,
     CATEGORY_MAIN,
     CATEGORY_PACKSHOT,
+    DEFAULT_OLLAMA_MODEL,
     IMAGE_EXTENSIONS,
 )
 
@@ -117,7 +118,7 @@ def process_folder(folder_path: str,
                    api_type: str = "none",
                    api_key: str | None = None,
                    ollama_url: str | None = None,
-                   ollama_model: str = "llava",
+                   ollama_model: str = DEFAULT_OLLAMA_MODEL,
                    progress_callback=None) -> dict:
     """
     Аналізує та сортує всі зображення в папці.

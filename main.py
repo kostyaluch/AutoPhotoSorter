@@ -17,6 +17,7 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
+from analyzer import DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL
 from sorter import find_subfolders_with_images, get_images_in_folder, rename_images_in_folder, process_folder
 from reporter import generate_report
 
@@ -51,7 +52,10 @@ _API_HINTS = {
     "none": "💡 Лише OpenCV: визначає білий фон. Без AI класифікації типу контенту.",
     "gemini": "💡 Потрібен Google Gemini API ключ: https://aistudio.google.com/app/apikey\nУвага: ключ буде видимий в полі вводу.",
     "openai": "💡 Потрібен OpenAI API ключ: https://platform.openai.com/api-keys\nУвага: ключ буде видимий в полі вводу.",
-    "ollama": "💡 Ollama: локальний сервер з моделями (llava, bakllava). URL за замовчуванням: http://localhost:11434",
+    "ollama": (
+        f"💡 Ollama: локальний сервер з моделями. URL за замовчуванням: {DEFAULT_OLLAMA_URL}\n"
+        "Для фото використовуйте vision-модель і назву точно з 'ollama list'."
+    ),
     "clip": (
         "💡 CLIP: локальна модель (~350 MB), завантажується при першому запуску. "
         "Потрібні: pip install torch torchvision clip"
@@ -75,8 +79,8 @@ class AutoPhotoSorterApp:
         self._output_report = tk.StringVar()
         self._api_type = tk.StringVar(value="none")
         self._api_key = tk.StringVar()
-        self._ollama_url = tk.StringVar(value="http://localhost:11434")
-        self._ollama_model = tk.StringVar(value="llava")
+        self._ollama_url = tk.StringVar(value=DEFAULT_OLLAMA_URL)
+        self._ollama_model = tk.StringVar(value=DEFAULT_OLLAMA_MODEL)
         self._dry_run = tk.BooleanVar(value=False)
         self._processing = False
         self._stop_requested = False
@@ -471,7 +475,7 @@ class AutoPhotoSorterApp:
                 api_type=api_type,
                 api_key=api_key or None,
                 ollama_url=ollama_url or None,
-                ollama_model=ollama_model or "llava",
+                ollama_model=ollama_model or DEFAULT_OLLAMA_MODEL,
                 progress_callback=_progress_cb,
             )
 
