@@ -20,6 +20,7 @@ analyzer.py — Модуль аналізу зображень для AutoPhotoS
 import os
 import base64
 import logging
+import threading
 from io import BytesIO
 
 import cv2
@@ -74,6 +75,7 @@ _DEFAULT_OLLAMA_MODEL_FALLBACK = "llava"
 DEFAULT_OLLAMA_URL = os.environ.get(OLLAMA_URL_ENV_VAR, _DEFAULT_OLLAMA_URL_FALLBACK).strip() or _DEFAULT_OLLAMA_URL_FALLBACK
 DEFAULT_OLLAMA_MODEL = os.environ.get(OLLAMA_MODEL_ENV_VAR, _DEFAULT_OLLAMA_MODEL_FALLBACK).strip() or _DEFAULT_OLLAMA_MODEL_FALLBACK
 _OLLAMA_LOGGED_ISSUES: set[tuple[str, ...]] = set()
+_OLLAMA_LOGGED_ISSUES_LOCK = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # Константи категорій (порядок — пріоритет сортування)
@@ -341,9 +343,10 @@ def _get_ollama_error_details(response) -> str:
 
 
 def _log_ollama_issue_once(issue_key: tuple[str, ...], message: str, *args) -> None:
-    if issue_key in _OLLAMA_LOGGED_ISSUES:
-        return
-    _OLLAMA_LOGGED_ISSUES.add(issue_key)
+    with _OLLAMA_LOGGED_ISSUES_LOCK:
+        if issue_key in _OLLAMA_LOGGED_ISSUES:
+            return
+        _OLLAMA_LOGGED_ISSUES.add(issue_key)
     logger.warning(message, *args)
 
 
@@ -369,7 +372,10 @@ def classify_with_ollama(image_path: str, ollama_url: str | None, model_name: st
         logger.error("Ollama URL не вказано")
         return None
 
-    model_name = (model_name or DEFAULT_OLLAMA_MODEL).strip() or DEFAULT_OLLAMA_MODEL
+    if model_name:
+        model_name = model_name.strip() or DEFAULT_OLLAMA_MODEL
+    else:
+        model_name = DEFAULT_OLLAMA_MODEL
     ollama_url = _normalize_ollama_base_url(ollama_url)
 
     try:
