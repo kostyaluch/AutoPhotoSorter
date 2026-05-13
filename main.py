@@ -43,13 +43,15 @@ _API_TYPE_OPTIONS = [
     ("Тільки OpenCV (без AI)", "none"),
     ("Google Gemini API", "gemini"),
     ("OpenAI Vision API", "openai"),
+    ("Ollama (локальна модель)", "ollama"),
     ("Локальна модель CLIP", "clip"),
 ]
 
 _API_HINTS = {
     "none": "💡 Лише OpenCV: визначає білий фон. Без AI класифікації типу контенту.",
-    "gemini": "💡 Потрібен Google Gemini API ключ: https://aistudio.google.com/app/apikey",
-    "openai": "💡 Потрібен OpenAI API ключ: https://platform.openai.com/api-keys",
+    "gemini": "💡 Потрібен Google Gemini API ключ: https://aistudio.google.com/app/apikey\nУвага: ключ буде видимий в полі вводу.",
+    "openai": "💡 Потрібен OpenAI API ключ: https://platform.openai.com/api-keys\nУвага: ключ буде видимий в полі вводу.",
+    "ollama": "💡 Ollama: локальний сервер з моделями (llava, bakllava). URL за замовчуванням: http://localhost:11434",
     "clip": (
         "💡 CLIP: локальна модель (~350 MB), завантажується при першому запуску. "
         "Потрібні: pip install torch torchvision clip"
@@ -73,6 +75,8 @@ class AutoPhotoSorterApp:
         self._output_report = tk.StringVar()
         self._api_type = tk.StringVar(value="none")
         self._api_key = tk.StringVar()
+        self._ollama_url = tk.StringVar(value="http://localhost:11434")
+        self._ollama_model = tk.StringVar(value="llava")
         self._dry_run = tk.BooleanVar(value=False)
         self._processing = False
         self._stop_requested = False
@@ -167,10 +171,31 @@ class AutoPhotoSorterApp:
             row=1, column=0, sticky="w", pady=(6, 0)
         )
         self._api_key_entry = ttk.Entry(
-            api_frame, textvariable=self._api_key, show="*", state="disabled"
+            api_frame, textvariable=self._api_key, state="disabled"
         )
         self._api_key_entry.grid(
             row=1, column=1, sticky="ew", pady=(6, 0), padx=(6, 0)
+        )
+
+        # --- Ollama fields ---
+        ttk.Label(api_frame, text="Ollama URL:").grid(
+            row=2, column=0, sticky="w", pady=(6, 0)
+        )
+        self._ollama_url_entry = ttk.Entry(
+            api_frame, textvariable=self._ollama_url, state="disabled"
+        )
+        self._ollama_url_entry.grid(
+            row=2, column=1, sticky="ew", pady=(6, 0), padx=(6, 0)
+        )
+
+        ttk.Label(api_frame, text="Ollama модель:").grid(
+            row=3, column=0, sticky="w", pady=(6, 0)
+        )
+        self._ollama_model_entry = ttk.Entry(
+            api_frame, textvariable=self._ollama_model, state="disabled"
+        )
+        self._ollama_model_entry.grid(
+            row=3, column=1, sticky="ew", pady=(6, 0), padx=(6, 0)
         )
 
         self._api_hint_label = ttk.Label(
@@ -181,7 +206,7 @@ class AutoPhotoSorterApp:
             wraplength=700,
         )
         self._api_hint_label.grid(
-            row=2, column=0, columnspan=2, sticky="w", pady=(4, 0)
+            row=4, column=0, columnspan=2, sticky="w", pady=(4, 0)
         )
 
         # --- Опції ---
@@ -270,7 +295,11 @@ class AutoPhotoSorterApp:
     def _on_api_type_change(self) -> None:
         api = self._api_type.get()
         needs_key = api in ("gemini", "openai")
+        needs_ollama = api == "ollama"
+        
         self._api_key_entry.config(state="normal" if needs_key else "disabled")
+        self._ollama_url_entry.config(state="normal" if needs_ollama else "disabled")
+        self._ollama_model_entry.config(state="normal" if needs_ollama else "disabled")
         self._api_hint_label.config(text=_API_HINTS.get(api, ""))
 
     def _browse_input(self) -> None:
@@ -337,6 +366,9 @@ class AutoPhotoSorterApp:
 
         api = self._api_type.get()
         api_key = self._api_key.get().strip()
+        ollama_url = self._ollama_url.get().strip()
+        ollama_model = self._ollama_model.get().strip()
+        
         if api in ("gemini", "openai") and not api_key:
             if not messagebox.askyesno(
                 "API ключ відсутній",
@@ -345,6 +377,10 @@ class AutoPhotoSorterApp:
             ):
                 return
             api = "none"
+        
+        if api == "ollama" and not ollama_url:
+            messagebox.showerror("Помилка", "Будь ласка, вкажіть Ollama URL.")
+            return
 
         self._processing = True
         self._stop_requested = False
@@ -354,7 +390,7 @@ class AutoPhotoSorterApp:
 
         thread = threading.Thread(
             target=self._worker,
-            args=(input_dir, output_report, api, api_key, self._dry_run.get()),
+            args=(input_dir, output_report, api, api_key, ollama_url, ollama_model, self._dry_run.get()),
             daemon=True,
         )
         thread.start()
@@ -377,9 +413,12 @@ class AutoPhotoSorterApp:
                 output_report: str,
                 api_type: str,
                 api_key: str,
+                ollama_url: str,
+                ollama_model: str,
                 dry_run: bool) -> None:
         try:
-            self._run_processing(input_dir, output_report, api_type, api_key, dry_run)
+            self._run_processing(input_dir, output_report, api_type, api_key, 
+                               ollama_url, ollama_model, dry_run)
         except Exception as exc:
             self._log(f"❌  Критична помилка: {exc}", "error")
             logger.exception("Worker thread error")
@@ -391,6 +430,8 @@ class AutoPhotoSorterApp:
                         output_report: str,
                         api_type: str,
                         api_key: str,
+                        ollama_url: str,
+                        ollama_model: str,
                         dry_run: bool) -> None:
 
         self._log(f"🚀  Початок обробки: {input_dir}", "info")
@@ -429,6 +470,8 @@ class AutoPhotoSorterApp:
                 folder_path,
                 api_type=api_type,
                 api_key=api_key or None,
+                ollama_url=ollama_url or None,
+                ollama_model=ollama_model or "llava",
                 progress_callback=_progress_cb,
             )
 
