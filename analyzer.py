@@ -67,6 +67,12 @@ except ImportError:
     REQUESTS_AVAILABLE = False
     logger.info("requests не встановлено — Ollama API недоступний.")
 
+OLLAMA_URL_ENV_VAR = "AUTOPHOTOSORTER_OLLAMA_URL"
+OLLAMA_MODEL_ENV_VAR = "AUTOPHOTOSORTER_OLLAMA_MODEL"
+DEFAULT_OLLAMA_URL = os.environ.get(OLLAMA_URL_ENV_VAR, "http://localhost:11434").strip() or "http://localhost:11434"
+DEFAULT_OLLAMA_MODEL = os.environ.get(OLLAMA_MODEL_ENV_VAR, "llava").strip() or "llava"
+_OLLAMA_LOGGED_ISSUES: set[tuple[str, ...]] = set()
+
 # ---------------------------------------------------------------------------
 # Константи категорій (порядок — пріоритет сортування)
 # ---------------------------------------------------------------------------
@@ -308,7 +314,38 @@ def classify_with_openai(image_path: str, api_key: str) -> str | None:
 # 6. Класифікація через Ollama (локальні моделі, наприклад Gemma)
 # ---------------------------------------------------------------------------
 
-def classify_with_ollama(image_path: str, ollama_url: str | None, model_name: str = "llava") -> str | None:
+def _normalize_ollama_base_url(ollama_url: str) -> str:
+    normalized = ollama_url.strip().rstrip("/")
+    for suffix in ("/api/generate", "/api/chat", "/api"):
+        if normalized.endswith(suffix):
+            return normalized[: -len(suffix)]
+    return normalized
+
+
+def _get_ollama_error_details(response) -> str:
+    if response is None:
+        return ""
+    try:
+        payload = response.json()
+    except ValueError:
+        return (response.text or "").strip()
+
+    if isinstance(payload, dict):
+        for key in ("error", "message"):
+            value = payload.get(key)
+            if value:
+                return str(value).strip()
+    return str(payload).strip()
+
+
+def _log_ollama_issue_once(issue_key: tuple[str, ...], message: str, *args) -> None:
+    if issue_key in _OLLAMA_LOGGED_ISSUES:
+        return
+    _OLLAMA_LOGGED_ISSUES.add(issue_key)
+    logger.warning(message, *args)
+
+
+def classify_with_ollama(image_path: str, ollama_url: str | None, model_name: str = DEFAULT_OLLAMA_MODEL) -> str | None:
     """
     Класифікує зображення через Ollama (локальні моделі).
 
@@ -329,38 +366,96 @@ def classify_with_ollama(image_path: str, ollama_url: str | None, model_name: st
     if not ollama_url:
         logger.error("Ollama URL не вказано")
         return None
-    
+
+    model_name = (model_name or DEFAULT_OLLAMA_MODEL).strip() or DEFAULT_OLLAMA_MODEL
+    ollama_url = _normalize_ollama_base_url(ollama_url)
+
     try:
         img_b64 = _encode_image_base64(image_path)
         if not img_b64:
             return None
 
-        # Видаляємо trailing slash з URL
-        ollama_url = ollama_url.rstrip('/')
         endpoint = f"{ollama_url}/api/generate"
-        
+
         payload = {
             "model": model_name,
             "prompt": _CLASSIFY_PROMPT,
             "images": [img_b64],
             "stream": False
         }
-        
+
         response = requests.post(endpoint, json=payload, timeout=60)
         response.raise_for_status()
-        
+
         result = response.json()
         response_text = result.get("response", "")
-        
+
         return _parse_ai_response(response_text)
     except requests.exceptions.ConnectionError as exc:
-        logger.warning(f"classify_with_ollama: Не вдалося підключитися до Ollama ({ollama_url}): {exc}")
+        _log_ollama_issue_once(
+            ("connection", ollama_url),
+            "classify_with_ollama: Не вдалося підключитися до Ollama (%s): %s. "
+            "Перевірте, що сервіс запущено командою 'ollama serve' і що %s доступний. "
+            "Повідомлення користувачу: 'Не вдалося з'єднатися з локальною Ollama. "
+            "Запустіть ollama serve та повторіть спробу.'",
+            ollama_url,
+            exc,
+            endpoint,
+        )
         return None
     except requests.exceptions.Timeout as exc:
-        logger.warning(f"classify_with_ollama: Час очікування вичерпано ({ollama_url}): {exc}")
+        _log_ollama_issue_once(
+            ("timeout", ollama_url),
+            "classify_with_ollama: Час очікування Ollama вичерпано (%s): %s. "
+            "Повідомлення користувачу: 'Ollama відповідає надто довго. "
+            "Перевірте навантаження на модель або спробуйте ще раз.'",
+            ollama_url,
+            exc,
+        )
         return None
     except requests.exceptions.HTTPError as exc:
-        logger.warning(f"classify_with_ollama: HTTP помилка ({ollama_url}): {exc}")
+        response = exc.response
+        status_code = response.status_code if response is not None else "?"
+        details = _get_ollama_error_details(response)
+        details_lower = details.lower()
+
+        if status_code == 404 and "model" in details_lower and "not found" in details_lower:
+            _log_ollama_issue_once(
+                ("model_not_found", ollama_url, model_name),
+                "classify_with_ollama: Модель Ollama '%s' не знайдено на %s. "
+                "Деталі відповіді: %s. Перевірте назву моделі через 'ollama list' "
+                "і за потреби виконайте 'ollama pull %s'. "
+                "Повідомлення користувачу: 'Модель %s не знайдено в Ollama. "
+                "Звірте назву з ollama list або встановіть модель командою ollama pull %s.'",
+                model_name,
+                endpoint,
+                details or exc,
+                model_name,
+                model_name,
+                model_name,
+            )
+        elif status_code == 404:
+            _log_ollama_issue_once(
+                ("http_404", ollama_url),
+                "classify_with_ollama: Ollama повернула 404 для %s. "
+                "Можливі причини: сервіс не запущено, URL вказує не на Ollama, "
+                "або використано неправильний endpoint. Деталі відповіді: %s. "
+                "Повідомлення користувачу: 'Ollama відповіла 404. Перевірте URL, "
+                "що працює саме сервер Ollama, і endpoint /api/generate.'",
+                endpoint,
+                details or exc,
+            )
+        else:
+            _log_ollama_issue_once(
+                ("http_error", ollama_url, str(status_code)),
+                "classify_with_ollama: HTTP помилка Ollama (%s, статус %s): %s. "
+                "Повідомлення користувачу: 'Ollama повернула HTTP %s. "
+                "Перевірте лог сервісу та параметри запиту.'",
+                endpoint,
+                status_code,
+                details or exc,
+                status_code,
+            )
         return None
     except Exception as exc:
         logger.warning(f"classify_with_ollama: {exc}")
@@ -428,7 +523,7 @@ def classify_image(image_path: str,
                    api_type: str = "none",
                    api_key: str | None = None,
                    ollama_url: str | None = None,
-                   ollama_model: str = "llava",
+                   ollama_model: str = DEFAULT_OLLAMA_MODEL,
                    white_bg_score: float = 0.0,
                    has_text: bool = False,
                    detected_text: str = "") -> tuple[str, float, str]:
@@ -507,7 +602,7 @@ def analyze_image(image_path: str,
                   api_type: str = "none",
                   api_key: str | None = None,
                   ollama_url: str | None = None,
-                  ollama_model: str = "llava") -> dict:
+                  ollama_model: str = DEFAULT_OLLAMA_MODEL) -> dict:
     """
     Виконує повний аналіз зображення і повертає словник з результатами.
 

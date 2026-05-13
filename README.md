@@ -92,35 +92,157 @@ pip install openai
 ```
 Отримайте ключ на [https://platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 
-### Ollama (локальні моделі, наприклад Gemma)
+### Ollama (локальні моделі, локальний API)
 
-Ollama дозволяє запускати великі мовні моделі локально на вашому комп'ютері.
+Ollama дозволяє запускати моделі локально й використовувати їх через HTTP API. У цьому проєкті запит іде на endpoint `POST /api/generate`, а в GUI потрібно вказувати **базовий URL сервера** — за замовчуванням `http://localhost:11434`.
 
-1. Встановіть Ollama:
-   - **Завантажте та встановіть з [https://ollama.ai/](https://ollama.ai/)**
-   - Або через пакетний менеджер (Linux/macOS):
-     ```bash
-     curl -fsSL https://ollama.ai/install.sh | sh
-     ```
+> **Важливо:** для аналізу фотографій потрібна **vision-модель**. Текстові моделі на кшталт `gemma4:latest` можна використати для перевірки самого API, але вони не підходять для класифікації зображень у цьому застосунку.
 
-2. Завантажте модель з підтримкою зображень:
-   ```bash
-   ollama pull llava
-   # або
-   ollama pull bakllava
-   ```
+#### 1. Встановлення Ollama
 
-3. Запустіть Ollama сервер (якщо не запущено автоматично):
+- **Windows / macOS**: завантажте інсталятор з [https://ollama.com/download](https://ollama.com/download)
+- **Linux**:
+  ```bash
+  curl -fsSL https://ollama.com/install.sh | sh
+  ```
+
+#### 2. Запуск сервісу Ollama
+
+На деяких системах Ollama запускається у фоні автоматично після встановлення. Якщо ні — стартуйте сервер вручну:
+
+```bash
+ollama serve
+```
+
+Після запуску сервер має слухати:
+
+```text
+http://localhost:11434
+```
+
+#### 3. Перевірка, що модель встановлена локально
+
+Подивіться список доступних моделей:
+
+```bash
+ollama list
+```
+
+Приклад:
+
+```text
+NAME             ID           SIZE
+llava:latest     ...          ...
+gemma4:latest    ...          ...
+```
+
+Якщо потрібної vision-моделі немає — встановіть її:
+
+```bash
+ollama pull llava
+# або
+ollama pull bakllava
+```
+
+#### 4. Перевірка доступності Ollama через curl
+
+##### Linux / macOS / Git Bash
+
+```bash
+curl http://localhost:11434/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llava",
+    "prompt": "Привіт",
+    "stream": false
+  }'
+```
+
+##### Windows Command Prompt (cmd.exe)
+
+У `cmd.exe` JSON краще передавати **в один рядок**:
+
+```bat
+curl http://localhost:11434/api/generate -H "Content-Type: application/json" -d "{\"model\":\"gemma4:latest\",\"prompt\":\"Привіт\",\"stream\":false}"
+```
+
+Саме тут часто трапляється помилка, як на вашому скриншоті: `curl` запускається, а наступні рядки JSON `cmd.exe` намагається виконати як окремі команди (`"model"` is not recognized...). Це проблема формату команди Windows, а не обов'язково проблема в Ollama.
+
+<img src="https://github.com/user-attachments/assets/b8569ce1-4f60-42b1-9f6f-d26ffa93682f" alt="Приклад перевірки Ollama у Windows CMD" width="900">
+
+##### Швидка перевірка списку локальних моделей через API
+
+```bash
+curl http://localhost:11434/api/tags
+```
+
+#### 5. Перевірка Ollama з Python
+
+Мінімальний приклад для перевірки API:
+
+```python
+import requests
+
+OLLAMA_URL = "http://localhost:11434"
+MODEL_NAME = "gemma4:latest"  # або точна назва з `ollama list`
+
+payload = {
+    "model": MODEL_NAME,
+    "prompt": "Відповідай одним словом: працює",
+    "stream": False,
+}
+
+response = requests.post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=60)
+response.raise_for_status()
+print(response.json())
+```
+
+Якщо хочете перевірити саме **робочий сценарій цього проєкту**, використовуйте модель із підтримкою зображень:
+
+```python
+import base64
+import requests
+
+OLLAMA_URL = "http://localhost:11434"
+MODEL_NAME = "llava"  # або інша vision-модель з `ollama list`
+IMAGE_PATH = "example.jpg"
+
+with open(IMAGE_PATH, "rb") as f:
+    image_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+payload = {
+    "model": MODEL_NAME,
+    "prompt": "Опиши фото одним коротким реченням українською.",
+    "images": [image_b64],
+    "stream": False,
+}
+
+response = requests.post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=60)
+response.raise_for_status()
+print(response.json()["response"])
+```
+
+#### 6. Правильне підключення Ollama в AutoPhotoSorter
+
+1. Запустіть сервер:
    ```bash
    ollama serve
    ```
+2. Переконайтеся, що модель є у списку:
+   ```bash
+   ollama list
+   ```
+3. У GUI програми:
+   - виберіть **"Ollama (локальна модель)"**
+   - у полі **Ollama URL** вкажіть базову адресу, наприклад `http://localhost:11434`
+   - у полі **Ollama модель** вкажіть **точну назву** з `ollama list`
+4. За потреби можна задати дефолтні значення через змінні середовища:
+   ```bash
+   AUTOPHOTOSORTER_OLLAMA_URL=http://localhost:11434
+   AUTOPHOTOSORTER_OLLAMA_MODEL=llava
+   ```
 
-4. У GUI програмі:
-   - Виберіть "Ollama (локальна модель)"
-   - Вкажіть URL: `http://localhost:11434` (за замовчуванням)
-   - Вкажіть модель: `llava` або `bakllava`
-
-> **Примітка**: Чиста модель Gemma не підтримує зображення. Для аналізу фотографій використовуйте llava або bakllava.
+> Порада: якщо випадково вставити в GUI `http://localhost:11434/api` або навіть `http://localhost:11434/api/generate`, програма тепер нормалізує адресу до базового URL. Але найкраще все одно вказувати саме `http://localhost:11434`.
 
 ### Локальна CLIP модель (без API, ~350 MB)
 
@@ -197,6 +319,79 @@ border_fraction = 0.10  # Частка краю зображення для ан
 WHITE_BG_HIGH   = 0.85  # Поріг для категорії "main" (ідеально білий фон)
 WHITE_BG_MEDIUM = 0.55  # Поріг для категорії "packshot" (світлий фон)
 ```
+
+---
+
+## Олія для Ollama: часті питання та рішення
+
+### Чому бачу `404 Client Error: Not Found for url: http://localhost:11434/api/generate`?
+
+Найчастіші причини:
+
+1. **Ollama не запущена**
+   - Запустіть:
+     ```bash
+     ollama serve
+     ```
+   - Потім перевірте:
+     ```bash
+     curl http://localhost:11434/api/tags
+     ```
+
+2. **На порту `11434` відповідає не Ollama**
+   - Перевірте, що відкривається саме Ollama API, а не інший локальний сервіс.
+
+3. **Вказано неправильний URL або endpoint**
+   - У програмі задавайте базовий URL: `http://localhost:11434`
+   - Не потрібно вручну дописувати `/api/generate`
+
+4. **Модель не встановлена або неправильно названа**
+   - Перевірте:
+     ```bash
+     ollama list
+     ```
+   - Якщо моделі немає:
+     ```bash
+     ollama pull llava
+     ```
+
+5. **Модель є, але вона не підтримує зображення**
+   - `gemma4:latest` підходить для текстових тестів API
+   - для цього проєкту потрібна vision-модель: `llava`, `bakllava` або інша сумісна мультимодальна модель
+
+6. **Проблема саме в Windows `curl`, а не в Ollama**
+   - У `cmd.exe` JSON має бути в один рядок або з правильно екранованими лапками
+   - Якщо є сумніви — перевірте тим самим запитом через Python
+
+### Як зрозуміти, що саме не так — з'єднання чи модель?
+
+- **Немає з'єднання**: зазвичай буде `ConnectionError` або таймаут. У логах програми з'явиться підказка українською про `ollama serve` і перевірку `http://localhost:11434`.
+- **Модель не знайдено**: Ollama часто повертає `404` з текстом на кшталт `model '...' not found`. Програма тепер логує окреме зрозуміле повідомлення українською з порадою перевірити `ollama list` або виконати `ollama pull ...`.
+
+### Які повідомлення тепер показує програма в логах?
+
+Приклади:
+
+- `Не вдалося з'єднатися з локальною Ollama. Запустіть ollama serve та повторіть спробу.`
+- `Модель llava-custom не знайдено в Ollama. Звірте назву з ollama list або встановіть модель командою ollama pull llava-custom.`
+- `Ollama відповіла 404. Перевірте URL, що працює саме сервер Ollama, і endpoint /api/generate.`
+
+### Чи можна змінити модель без редагування коду?
+
+Так. Можна:
+
+- ввести модель у GUI-полі **Ollama модель**
+- або задати змінну середовища `AUTOPHOTOSORTER_OLLAMA_MODEL`
+
+### Чи потрібен `ollama run`?
+
+Не обов'язково для роботи API, але це зручна ручна перевірка:
+
+```bash
+ollama run llava
+```
+
+Якщо `ollama run ...` не працює, спершу виправте це, а вже потім підключайте модель до AutoPhotoSorter.
 
 ---
 
