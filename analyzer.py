@@ -17,9 +17,11 @@ analyzer.py — Модуль аналізу зображень для AutoPhotoS
   infographic — Інфографіка: фото з розмірами, схемами, текстом характеристик
 """
 
+import json
 import os
 import base64
 import logging
+import re
 import threading
 from io import BytesIO
 
@@ -76,6 +78,10 @@ DEFAULT_OLLAMA_URL = os.environ.get(OLLAMA_URL_ENV_VAR, _DEFAULT_OLLAMA_URL_FALL
 DEFAULT_OLLAMA_MODEL = os.environ.get(OLLAMA_MODEL_ENV_VAR, _DEFAULT_OLLAMA_MODEL_FALLBACK).strip() or _DEFAULT_OLLAMA_MODEL_FALLBACK
 _OLLAMA_LOGGED_ISSUES: set[tuple[str, ...]] = set()
 _OLLAMA_LOGGED_ISSUES_LOCK = threading.Lock()
+
+# Максимальна кількість зображень в одному запиті ранжування до Ollama.
+# Більше зображень — більший payload і час обробки.
+OLLAMA_MAX_IMAGES_PER_RANK = 20
 
 # ---------------------------------------------------------------------------
 # Константи категорій (порядок — пріоритет сортування)
@@ -467,6 +473,214 @@ def classify_with_ollama(image_path: str, ollama_url: str | None, model_name: st
         return None
     except Exception as exc:
         logger.warning(f"classify_with_ollama: {exc}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# 6b. Ранжування набору зображень через Ollama (folder-level ordering)
+# ---------------------------------------------------------------------------
+
+_RANK_PROMPT_TEMPLATE = (
+    "You are a professional e-commerce photo editor deciding the display order "
+    "for {n} product photos.\n"
+    "The photos are numbered 1 to {n} in the order they appear in the images array.\n\n"
+    "Sort them using these priority rules:\n"
+    "1. FIRST: product on a white/light background, clean, well-lit, "
+    "product clearly visible (main shot)\n"
+    "2. THEN: other shots on a solid/neutral background (different angles)\n"
+    "3. THEN: close-up detail shots (textures, materials, features)\n"
+    "4. THEN: lifestyle photos (product in an interior or real-life use context)\n"
+    "5. THEN: kit photos (product shown with box, packaging, or accessories)\n"
+    "6. LAST: infographic photos (text overlays, dimensions, specs, diagrams)\n\n"
+    "Respond with ONLY a JSON array of the photo numbers in your preferred order.\n"
+    "All {n} numbers from 1 to {n} must appear exactly once.\n"
+    "Example format for {n} photos: {example}\n"
+    "Do NOT include any explanation — just the JSON array."
+)
+
+
+def _parse_rank_response(text: str, n_images: int) -> list[int] | None:
+    """
+    Парсить відповідь Ollama для ранжування набору зображень.
+
+    Шукає JSON-масив цілих чисел у тексті відповіді.
+    Повертає список 0-based індексів (перестановку range(n_images))
+    або None при помилці.
+    """
+    # Шукаємо перший JSON-масив у відповіді
+    match = re.search(r'\[[\d,\s]+\]', text.strip())
+    if not match:
+        logger.warning(
+            "_parse_rank_response: JSON-масив не знайдено у відповіді: %r",
+            text[:300],
+        )
+        return None
+
+    try:
+        arr = json.loads(match.group())
+    except (ValueError, json.JSONDecodeError) as exc:
+        logger.warning("_parse_rank_response: помилка JSON-парсингу: %s", exc)
+        return None
+
+    if not isinstance(arr, list):
+        logger.warning("_parse_rank_response: отримано не список: %r", type(arr))
+        return None
+
+    # Перевіряємо: всі елементи — цілі, рівно n_images штук, перестановка 1..n
+    if not all(isinstance(x, int) for x in arr):
+        logger.warning(
+            "_parse_rank_response: масив містить не цілі числа: %r", arr[:20]
+        )
+        return None
+
+    if sorted(arr) != list(range(1, n_images + 1)):
+        logger.warning(
+            "_parse_rank_response: неповна або невалідна перестановка: %r "
+            "(очікувалось 1..%d)",
+            arr,
+            n_images,
+        )
+        return None
+
+    # Перетворюємо 1-based → 0-based
+    return [x - 1 for x in arr]
+
+
+def rank_images_with_ollama(
+    image_paths: list[str],
+    ollama_url: str | None,
+    model_name: str = DEFAULT_OLLAMA_MODEL,
+) -> list[int] | None:
+    """
+    Ранжує набір зображень продукту через Ollama.
+
+    Надсилає всі зображення (до OLLAMA_MAX_IMAGES_PER_RANK) одним запитом і
+    просить vision-модель визначити оптимальний порядок їх відображення.
+
+    Параметри:
+      image_paths — список шляхів до зображень (мінімум 2, не більше
+                    OLLAMA_MAX_IMAGES_PER_RANK)
+      ollama_url  — базовий URL Ollama API (наприклад, http://localhost:11434)
+      model_name  — назва vision-моделі в Ollama (наприклад, "llava")
+
+    Повертає список 0-based індексів — перестановку range(len(image_paths)) —
+    де елемент з індексом 0 вказує на зображення, що має бути першим, і т.д.
+    Повертає None при будь-якій помилці; у цьому випадку слід використовувати
+    стандартне категорійне сортування.
+
+    Примітка: Модель повинна підтримувати обробку зображень (vision-модель).
+    """
+    if not REQUESTS_AVAILABLE:
+        logger.error("requests не встановлено. Виконайте: pip install requests")
+        return None
+
+    if not ollama_url:
+        logger.error("rank_images_with_ollama: Ollama URL не вказано")
+        return None
+
+    n = len(image_paths)
+    if n < 2:
+        logger.info(
+            "rank_images_with_ollama: менше 2 зображень (%d) — ранжування не потрібне",
+            n,
+        )
+        return None
+
+    if n > OLLAMA_MAX_IMAGES_PER_RANK:
+        logger.warning(
+            "rank_images_with_ollama: кількість зображень (%d) перевищує ліміт (%d). "
+            "Ранжування Ollama пропущено — буде використано стандартне сортування.",
+            n,
+            OLLAMA_MAX_IMAGES_PER_RANK,
+        )
+        return None
+
+    model_name = (model_name or "").strip() or DEFAULT_OLLAMA_MODEL
+
+    ollama_url = _normalize_ollama_base_url(ollama_url)
+
+    # Кодуємо всі зображення
+    images_b64: list[str] = []
+    for path in image_paths:
+        b64 = _encode_image_base64(path)
+        if b64 is None:
+            logger.warning(
+                "rank_images_with_ollama: не вдалося кодувати %s — ранжування пропущено",
+                path,
+            )
+            return None
+        images_b64.append(b64)
+
+    # Будуємо приклад відповіді для промпту.
+    # Використовуємо просту ротацію ([2,3,...,n,1]) щоб показати модель рівно
+    # одну валідну перестановку — інакше модель може скопіювати [1,2,...,n].
+    if n == 2:
+        example = [2, 1]
+    else:
+        example = list(range(2, n + 1)) + [1]
+
+    prompt = _RANK_PROMPT_TEMPLATE.format(n=n, example=example)
+    endpoint = f"{ollama_url}/api/generate"
+
+    payload = {
+        "model": model_name,
+        "prompt": prompt,
+        "images": images_b64,
+        "stream": False,
+    }
+
+    try:
+        response = requests.post(endpoint, json=payload, timeout=120)
+        response.raise_for_status()
+
+        result = response.json()
+        response_text = result.get("response", "")
+        logger.info(
+            "rank_images_with_ollama: відповідь моделі: %r",
+            response_text[:300],
+        )
+
+        indices = _parse_rank_response(response_text, n)
+        if indices is None:
+            logger.warning(
+                "rank_images_with_ollama: не вдалося розпарсити відповідь. "
+                "Буде використано стандартне сортування."
+            )
+        return indices
+
+    except requests.exceptions.ConnectionError as exc:
+        _log_ollama_issue_once(
+            ("rank_connection", ollama_url),
+            "rank_images_with_ollama: Не вдалося підключитися до Ollama (%s): %s. "
+            "Буде використано стандартне сортування.",
+            ollama_url,
+            exc,
+        )
+        return None
+    except requests.exceptions.Timeout as exc:
+        _log_ollama_issue_once(
+            ("rank_timeout", ollama_url),
+            "rank_images_with_ollama: Час очікування Ollama вичерпано (%s): %s. "
+            "Буде використано стандартне сортування.",
+            ollama_url,
+            exc,
+        )
+        return None
+    except requests.exceptions.HTTPError as exc:
+        response = exc.response
+        status_code = response.status_code if response is not None else "?"
+        details = _get_ollama_error_details(response)
+        _log_ollama_issue_once(
+            ("rank_http_error", ollama_url, str(status_code)),
+            "rank_images_with_ollama: HTTP помилка Ollama (%s, статус %s): %s. "
+            "Буде використано стандартне сортування.",
+            endpoint,
+            status_code,
+            details or exc,
+        )
+        return None
+    except Exception as exc:
+        logger.warning("rank_images_with_ollama: %s", exc)
         return None
 
 
