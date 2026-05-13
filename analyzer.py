@@ -17,9 +17,11 @@ analyzer.py — Модуль аналізу зображень для AutoPhotoS
   infographic — Інфографіка: фото з розмірами, схемами, текстом характеристик
 """
 
+import json
 import os
 import base64
 import logging
+import re
 import threading
 from io import BytesIO
 
@@ -478,9 +480,6 @@ def classify_with_ollama(image_path: str, ollama_url: str | None, model_name: st
 # 6b. Ранжування набору зображень через Ollama (folder-level ordering)
 # ---------------------------------------------------------------------------
 
-import json as _json
-import re as _re
-
 _RANK_PROMPT_TEMPLATE = (
     "You are a professional e-commerce photo editor deciding the display order "
     "for {n} product photos.\n"
@@ -509,7 +508,7 @@ def _parse_rank_response(text: str, n_images: int) -> list[int] | None:
     або None при помилці.
     """
     # Шукаємо перший JSON-масив у відповіді
-    match = _re.search(r'\[[\d,\s]+\]', text.strip())
+    match = re.search(r'\[[\d,\s]+\]', text.strip())
     if not match:
         logger.warning(
             "_parse_rank_response: JSON-масив не знайдено у відповіді: %r",
@@ -518,8 +517,8 @@ def _parse_rank_response(text: str, n_images: int) -> list[int] | None:
         return None
 
     try:
-        arr = _json.loads(match.group())
-    except (ValueError, _json.JSONDecodeError) as exc:
+        arr = json.loads(match.group())
+    except (ValueError, json.JSONDecodeError) as exc:
         logger.warning("_parse_rank_response: помилка JSON-парсингу: %s", exc)
         return None
 
@@ -596,10 +595,7 @@ def rank_images_with_ollama(
         )
         return None
 
-    if model_name:
-        model_name = model_name.strip() or DEFAULT_OLLAMA_MODEL
-    else:
-        model_name = DEFAULT_OLLAMA_MODEL
+    model_name = (model_name or "").strip() or DEFAULT_OLLAMA_MODEL
 
     ollama_url = _normalize_ollama_base_url(ollama_url)
 
@@ -615,7 +611,9 @@ def rank_images_with_ollama(
             return None
         images_b64.append(b64)
 
-    # Будуємо приклад відповіді (проста ротація для наочності)
+    # Будуємо приклад відповіді для промпту.
+    # Використовуємо просту ротацію ([2,3,...,n,1]) щоб показати модель рівно
+    # одну валідну перестановку — інакше модель може скопіювати [1,2,...,n].
     if n == 2:
         example = [2, 1]
     else:
