@@ -90,6 +90,11 @@ CATEGORY_LABELS_UK = {
 # Підтримувані розширення зображень
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
 
+# Налаштування класифікації
+# Максимальна кількість слів тексту, що допускається для категорії 'main'
+# Фото з більшою кількістю тексту будуть класифіковані як 'packshot' або 'infographic'
+MAX_WORDS_FOR_MAIN_CATEGORY = 6
+
 # ---------------------------------------------------------------------------
 # 1. Визначення білого фону (OpenCV)
 # ---------------------------------------------------------------------------
@@ -383,11 +388,11 @@ def classify_image(image_path: str,
 
     # --- Поєднання AI результату з OpenCV/OCR ---
     if ai_category:
-        # Якщо AI каже "main", але OCR знайшов багато тексту (більше 6 слів) — понижуємо до packshot
-        # Малі логотипи або брендування (1-6 слів) приймаються для категорії main
+        # Якщо AI каже "main", але OCR знайшов багато тексту — понижуємо до packshot
+        # Малі логотипи або брендування (до MAX_WORDS_FOR_MAIN_CATEGORY слів) приймаються
         if ai_category == CATEGORY_MAIN and has_text and detected_text:
             word_count = len(detected_text.split())
-            if word_count > 6:
+            if word_count > MAX_WORDS_FOR_MAIN_CATEGORY:
                 ai_category = CATEGORY_PACKSHOT
         return ai_category, 1.0, method
 
@@ -395,7 +400,7 @@ def classify_image(image_path: str,
     word_count = len(detected_text.split()) if detected_text else 0
 
     if has_text:
-        if word_count > 6:
+        if word_count > MAX_WORDS_FOR_MAIN_CATEGORY:
             # Багато тексту → скоріше за все інфографіка
             return CATEGORY_INFOGRAPHIC, 0.6, method
         else:
