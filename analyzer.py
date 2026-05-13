@@ -7,7 +7,8 @@ analyzer.py — Модуль аналізу зображень для AutoPhotoS
   - Класифікацію контенту (Google Gemini API / OpenAI Vision API / локальна CLIP модель)
 
 Категорії зображень (у порядку пріоритету для сортування):
-  main        — Головне фото: білий фон, без тексту/логотипів
+  main        — Головне фото: білий/світлий фон (не обов'язково ідеально чистий),
+                може бути присутній логотип, але це має бути саме фото товару
   packshot    — Пекшот: однотонний фон, інший ракурс
   detail      — Деталь: макрозйомка матеріалу або елементу
   lifestyle   — Лайфстайл: товар в інтер'єрі або в умовах реального використання
@@ -78,7 +79,7 @@ CATEGORY_ORDER = [
 ]
 
 CATEGORY_LABELS_UK = {
-    CATEGORY_MAIN: "Головне фото",
+    CATEGORY_MAIN: "Головне фото (білий/світлий фон)",
     CATEGORY_PACKSHOT: "Пекшот",
     CATEGORY_DETAIL: "Деталь",
     CATEGORY_LIFESTYLE: "Лайфстайл",
@@ -198,7 +199,7 @@ def _encode_image_base64(image_path: str,
 # ---------------------------------------------------------------------------
 
 _CLASSIFY_PROMPT = """Classify this product photo into exactly one of these categories:
-1. main        — product on a perfectly white/clean background, no text, no watermarks, no logos added to the image (logos ON the product itself are OK), clear unobstructed product view
+1. main        — product on a white or very light background (doesn't need to be perfectly clean, small logos or branding in the background are acceptable), the product itself should be clearly visible and the main focus, well-lit professional product photography
 2. packshot    — product on a solid/neutral (not necessarily white) background, showing a different angle or composition
 3. detail      — close-up or macro shot of product details, textures, or materials
 4. lifestyle   — product placed in an interior setting or shown in real-life usage context
@@ -297,7 +298,7 @@ def classify_with_openai(image_path: str, api_key: str) -> str | None:
 _CLIP_MODEL_CACHE: dict = {}  # {device: (model, preprocess)}
 
 _CLIP_TEXT_PROMPTS = [
-    "product photo on white background, no text, clean product showcase",
+    "product photo on white or very light background, clear product showcase with good visibility, well-lit professional product photography, main product focus",
     "product packshot on solid neutral background, different angle",
     "close-up macro photo of product detail or material texture",
     "product placed in interior living space, lifestyle photo",
@@ -382,9 +383,12 @@ def classify_image(image_path: str,
 
     # --- Поєднання AI результату з OpenCV/OCR ---
     if ai_category:
-        # Якщо AI каже "main", але OCR знайшов текст — понижуємо до packshot
+        # Якщо AI каже "main", але OCR знайшов багато тексту (більше 6 слів) — понижуємо до packshot
+        # Малі логотипи або брендування (1-6 слів) приймаються для категорії main
         if ai_category == CATEGORY_MAIN and has_text:
-            ai_category = CATEGORY_PACKSHOT
+            word_count = len(detected_text.split())
+            if word_count > 6:
+                ai_category = CATEGORY_PACKSHOT
         return ai_category, 1.0, method
 
     # --- Резервна класифікація лише на основі OpenCV + OCR ---
