@@ -8,7 +8,8 @@ analyzer.py — Модуль аналізу зображень для AutoPhotoS
 
 Категорії зображень (у порядку пріоритету для сортування):
   main        — Головне фото: білий/світлий фон (не обов'язково ідеально чистий),
-                може бути присутній логотип, але це має бути саме фото товару
+                може бути присутній логотип або брендування (до 6 слів тексту),
+                але це має бути саме фото товару
   packshot    — Пекшот: однотонний фон, інший ракурс
   detail      — Деталь: макрозйомка матеріалу або елементу
   lifestyle   — Лайфстайл: товар в інтер'єрі або в умовах реального використання
@@ -204,7 +205,7 @@ def _encode_image_base64(image_path: str,
 # ---------------------------------------------------------------------------
 
 _CLASSIFY_PROMPT = """Classify this product photo into exactly one of these categories:
-1. main        — product on a white or very light background (doesn't need to be perfectly clean, small logos or branding in the background are acceptable), the product itself should be clearly visible and the main focus, well-lit professional product photography
+1. main        — product on a white or very light background (doesn't need to be perfectly clean, small logos or branding in the background are acceptable - up to 6 words of text), the product itself should be clearly visible and the main focus, well-lit professional product photography
 2. packshot    — product on a solid/neutral (not necessarily white) background, showing a different angle or composition
 3. detail      — close-up or macro shot of product details, textures, or materials
 4. lifestyle   — product placed in an interior setting or shown in real-life usage context
