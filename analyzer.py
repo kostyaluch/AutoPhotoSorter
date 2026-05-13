@@ -385,14 +385,14 @@ def classify_image(image_path: str,
     if ai_category:
         # Якщо AI каже "main", але OCR знайшов багато тексту (більше 6 слів) — понижуємо до packshot
         # Малі логотипи або брендування (1-6 слів) приймаються для категорії main
-        if ai_category == CATEGORY_MAIN and has_text:
+        if ai_category == CATEGORY_MAIN and has_text and detected_text:
             word_count = len(detected_text.split())
             if word_count > 6:
                 ai_category = CATEGORY_PACKSHOT
         return ai_category, 1.0, method
 
     # --- Резервна класифікація лише на основі OpenCV + OCR ---
-    word_count = len(detected_text.split())
+    word_count = len(detected_text.split()) if detected_text else 0
 
     if has_text:
         if word_count > 6:
