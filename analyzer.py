@@ -69,8 +69,10 @@ except ImportError:
 
 OLLAMA_URL_ENV_VAR = "AUTOPHOTOSORTER_OLLAMA_URL"
 OLLAMA_MODEL_ENV_VAR = "AUTOPHOTOSORTER_OLLAMA_MODEL"
-DEFAULT_OLLAMA_URL = os.environ.get(OLLAMA_URL_ENV_VAR, "http://localhost:11434").strip() or "http://localhost:11434"
-DEFAULT_OLLAMA_MODEL = os.environ.get(OLLAMA_MODEL_ENV_VAR, "llava").strip() or "llava"
+_DEFAULT_OLLAMA_URL_FALLBACK = "http://localhost:11434"
+_DEFAULT_OLLAMA_MODEL_FALLBACK = "llava"
+DEFAULT_OLLAMA_URL = os.environ.get(OLLAMA_URL_ENV_VAR, _DEFAULT_OLLAMA_URL_FALLBACK).strip() or _DEFAULT_OLLAMA_URL_FALLBACK
+DEFAULT_OLLAMA_MODEL = os.environ.get(OLLAMA_MODEL_ENV_VAR, _DEFAULT_OLLAMA_MODEL_FALLBACK).strip() or _DEFAULT_OLLAMA_MODEL_FALLBACK
 _OLLAMA_LOGGED_ISSUES: set[tuple[str, ...]] = set()
 
 # ---------------------------------------------------------------------------
