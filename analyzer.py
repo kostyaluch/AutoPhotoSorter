@@ -484,6 +484,7 @@ _RANK_PROMPT_TEMPLATE = (
     "You are a professional e-commerce photo editor deciding the display order "
     "for {n} product photos.\n"
     "The photos are numbered 1 to {n} in the order they appear in the images array.\n\n"
+    "The key goal is to produce a stable and predictable sequence of frames/angles.\n"
     "Sort them using these priority rules:\n"
     "1. FIRST: product on a white/light background, clean, well-lit, "
     "product clearly visible (main shot)\n"
@@ -492,11 +493,20 @@ _RANK_PROMPT_TEMPLATE = (
     "4. THEN: lifestyle photos (product in an interior or real-life use context)\n"
     "5. THEN: kit photos (product shown with box, packaging, or accessories)\n"
     "6. LAST: infographic photos (text overlays, dimensions, specs, diagrams)\n\n"
+    "For main + neutral-background angle shots, keep a smooth visual progression of "
+    "angles around the product (no abrupt jumps between opposite sides).\n"
+    "If multiple photos look equivalent, keep their existing numeric order for "
+    "deterministic output.\n\n"
     "Respond with ONLY a JSON array of the photo numbers in your preferred order.\n"
     "All {n} numbers from 1 to {n} must appear exactly once.\n"
     "Example format for {n} photos: {example}\n"
     "Do NOT include any explanation — just the JSON array."
 )
+
+_RANK_GENERATION_OPTIONS = {
+    "temperature": 0,
+    "top_p": 0.1,
+}
 
 
 def _parse_rank_response(text: str, n_images: int) -> list[int] | None:
@@ -627,6 +637,7 @@ def rank_images_with_ollama(
         "prompt": prompt,
         "images": images_b64,
         "stream": False,
+        "options": _RANK_GENERATION_OPTIONS,
     }
 
     try:
