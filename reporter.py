@@ -116,6 +116,9 @@ def _build_summary_sheet(ws: Worksheet, results: list[dict], title_row: int = 2)
         elif error:
             status = "❌ Помилка"
             row_fill = _fill(_RED)
+        elif result.get("has_alternative_main") and not result.get("has_ideal_main"):
+            status = "⚠️ Потрібна обробка"
+            row_fill = _fill(_YELLOW)
         elif result.get("fallback_used"):
             status = "⚠️ Потрібна перевірка"
             row_fill = _fill(_YELLOW)
@@ -126,6 +129,9 @@ def _build_summary_sheet(ws: Worksheet, results: list[dict], title_row: int = 2)
         # Головне фото
         if result.get("has_ideal_main"):
             main_status = "✅ Ідеальне знайдено"
+        elif result.get("has_alternative_main") and result.get("alternative_main_image"):
+            alt = result["alternative_main_image"]
+            main_status = f"⚠️ Альт. гол.: {alt.get('filename', '')} (має текст)"
         elif result.get("fallback_used") and result.get("fallback_image"):
             fb = result["fallback_image"]
             main_status = f"⚠️ Альтернатива: {fb.get('filename', '')}"
@@ -139,7 +145,14 @@ def _build_summary_sheet(ws: Worksheet, results: list[dict], title_row: int = 2)
 
         # Примітки
         notes = []
-        if result.get("fallback_used"):
+        if result.get("has_alternative_main"):
+            alt = result.get("alternative_main_image") or {}
+            notes.append(
+                f"Папка [{folder_name}]: Знайдено альтернативне головне фото "
+                f"('{alt.get('filename', '')}' має текст/плашки/водяні знаки). "
+                "Потрібна додаткова обробка для видалення тексту."
+            )
+        elif result.get("fallback_used"):
             notes.append(
                 f"Папка [{folder_name}]: Ідеальне головне фото не знайдено. "
                 "Обрано альтернативу. Потрібно знайти/зробити нове головне фото."
