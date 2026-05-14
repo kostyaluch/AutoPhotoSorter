@@ -179,37 +179,20 @@ def process_folder(folder_path: str,
         result["sorted_images"] = sorted_images
 
         # --- Визначення статусу головного фото ---
-        main_photos = categorized[CATEGORY_MAIN]
-        packshot_photos = categorized[CATEGORY_PACKSHOT]
+        ideal_candidates = [
+            img for img in sorted_images if img.get("is_ideal_main_eligible", False)
+        ]
+        alt_candidates = [
+            img for img in sorted_images if img.get("is_alternative_main_candidate", False)
+        ]
 
-        if main_photos:
-            best_main = main_photos[0]
-            # Ідеальне головне: немає тексту/плашок/водяних знаків.
-            # Після виправлення classify_image це гарантовано для фото, що пройшли
-            # OCR-перевірку, але перевіряємо ще раз як запобіжний захід.
-            if not best_main.get("has_text", False):
-                result["has_ideal_main"] = True
-            else:
-                # Edge case: AI класифікував як main, але OCR бачить текст
-                result["has_alternative_main"] = True
-                result["alternative_main_image"] = best_main
-
-        # Шукаємо "альтернативне головне фото" серед пекшотів:
-        # фото на білому/світлому фоні з текстом/плашками — потребує обробки
-        if not result["has_ideal_main"] and not result["has_alternative_main"]:
-            ALTERNATIVE_MAIN_THRESHOLD = 0.55
-            alt_candidates = [
-                p for p in packshot_photos
-                if p.get("white_bg_score", 0.0) >= ALTERNATIVE_MAIN_THRESHOLD
-                and p.get("has_text", False)
-            ]
-            if alt_candidates:
-                best_alt = max(
-                    alt_candidates,
-                    key=lambda x: x.get("white_bg_score", 0.0)
-                )
-                result["has_alternative_main"] = True
-                result["alternative_main_image"] = best_alt
+        if ideal_candidates:
+            result["has_ideal_main"] = True
+        elif alt_candidates:
+            result["has_alternative_main"] = True
+            result["alternative_main_image"] = max(
+                alt_candidates, key=lambda x: x.get("white_bg_score", 0.0)
+            )
 
         if not result["has_ideal_main"] and not result["has_alternative_main"]:
             # Жодного придатного головного фото — використовуємо найкраще доступне
@@ -252,8 +235,21 @@ def process_folder(folder_path: str,
                         f"Ollama: ранжування {n} фото разом…"
                     )
                 all_paths = [img["path"] for img in images_data]
+                ollama_summaries = [
+                    {
+                        "clip_white_bg_score": img.get("clip_white_bg_score", 0.0),
+                        "clip_single_product_score": img.get("clip_single_product_score", 0.0),
+                        "clip_collage_score": img.get("clip_collage_score", 0.0),
+                        "clip_lifestyle_score": img.get("clip_lifestyle_score", 0.0),
+                        "has_text_overlay": img.get("has_text_overlay", False),
+                        "is_ideal_main_eligible": img.get("is_ideal_main_eligible", False),
+                        "is_alternative_main_candidate": img.get("is_alternative_main_candidate", False),
+                        "rule_warnings": img.get("rule_warnings", []),
+                    }
+                    for img in images_data
+                ]
                 rank_order = rank_images_with_ollama(
-                    all_paths, ollama_url, ollama_model
+                    all_paths, ollama_url, ollama_model, image_summaries=ollama_summaries
                 )
                 if rank_order is not None:
                     result["sorted_images"] = [images_data[i] for i in rank_order]
@@ -267,8 +263,6 @@ def process_folder(folder_path: str,
                     # перевіряємо перше фото у відсортованому Ollama списку
                     first_photo = result["sorted_images"][0] if result["sorted_images"] else None
                     if first_photo:
-                        first_has_text = first_photo.get("has_text", False)
-                        first_white_bg = first_photo.get("white_bg_score", 0.0)
                         # Скидаємо попередні прапорці і визначаємо наново
                         result["has_ideal_main"] = False
                         result["has_alternative_main"] = False
@@ -276,13 +270,14 @@ def process_folder(folder_path: str,
                         result["fallback_used"] = False
                         result["fallback_image"] = None
 
-                        IDEAL_BG_THRESHOLD = 0.65
-                        ALTERNATIVE_BG_THRESHOLD = 0.45
-                        if not first_has_text and first_white_bg >= IDEAL_BG_THRESHOLD:
+                        if first_photo.get("is_ideal_main_eligible", False):
                             result["has_ideal_main"] = True
-                        elif first_has_text and first_white_bg >= ALTERNATIVE_BG_THRESHOLD:
+                        elif first_photo.get("is_alternative_main_candidate", False):
                             result["has_alternative_main"] = True
                             result["alternative_main_image"] = first_photo
+                        else:
+                            result["fallback_used"] = True
+                            result["fallback_image"] = first_photo
                         # else: Ollama помістила нейтральне фото на перше місце
                 else:
                     logger.info(
