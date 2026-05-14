@@ -83,6 +83,30 @@ _OLLAMA_LOGGED_ISSUES_LOCK = threading.Lock()
 # Більше зображень — більший payload і час обробки.
 OLLAMA_MAX_IMAGES_PER_RANK = 20
 
+# Промти для AI (можуть бути змінені через set_custom_prompts)
+_current_classify_prompt = None
+_current_rank_prompt = None
+
+def set_custom_prompts(classify_prompt: str | None = None, rank_prompt: str | None = None) -> None:
+    """
+    Встановлює користувацькі промти для класифікації та ранжування.
+    
+    Параметри:
+      classify_prompt — промт для класифікації зображень (None = використати стандартний)
+      rank_prompt — промт для ранжування зображень (None = використати стандартний)
+    """
+    global _current_classify_prompt, _current_rank_prompt
+    _current_classify_prompt = classify_prompt
+    _current_rank_prompt = rank_prompt
+
+def _get_classify_prompt() -> str:
+    """Повертає активний промт для класифікації."""
+    return _current_classify_prompt if _current_classify_prompt else _CLASSIFY_PROMPT
+
+def _get_rank_prompt_template() -> str:
+    """Повертає активний шаблон промту для ранжування."""
+    return _current_rank_prompt if _current_rank_prompt else _RANK_PROMPT_TEMPLATE
+
 # ---------------------------------------------------------------------------
 # Константи категорій (порядок — пріоритет сортування)
 # ---------------------------------------------------------------------------
@@ -270,7 +294,7 @@ def classify_with_gemini(image_path: str, api_key: str) -> str | None:
         # ---- Модель: змініть тут за потреби ----
         model = genai.GenerativeModel("gemini-1.5-flash")
         img = Image.open(image_path)
-        response = model.generate_content([_CLASSIFY_PROMPT, img])
+        response = model.generate_content([_get_classify_prompt(), img])
         return _parse_ai_response(response.text)
     except Exception as exc:
         logger.warning("classify_with_gemini: %s", exc)
@@ -307,7 +331,7 @@ def classify_with_openai(image_path: str, api_key: str) -> str | None:
             messages=[{
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": _CLASSIFY_PROMPT},
+                    {"type": "text", "text": _get_classify_prompt()},
                     {"type": "image_url",
                      "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
                 ],
@@ -432,7 +456,7 @@ def classify_with_ollama(image_path: str, ollama_url: str | None, model_name: st
 
         payload = {
             "model": model_name,
-            "prompt": _CLASSIFY_PROMPT,
+            "prompt": _get_classify_prompt(),
             "images": [img_b64],
             "stream": False
         }
@@ -670,7 +694,7 @@ def rank_images_with_ollama(
     else:
         example = list(range(2, n + 1)) + [1]
 
-    prompt = _RANK_PROMPT_TEMPLATE.format(n=n, example=example)
+    prompt = _get_rank_prompt_template().format(n=n, example=example)
     endpoint = f"{ollama_url}/api/generate"
 
     payload = {

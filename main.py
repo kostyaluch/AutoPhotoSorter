@@ -20,7 +20,8 @@ import json
 
 from analyzer import (
     DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL, OLLAMA_MAX_IMAGES_PER_RANK,
-    get_ollama_models, _CLASSIFY_PROMPT, _RANK_PROMPT_TEMPLATE, _CLIP_TEXT_PROMPTS
+    get_ollama_models, _CLASSIFY_PROMPT, _RANK_PROMPT_TEMPLATE, _CLIP_TEXT_PROMPTS,
+    set_custom_prompts
 )
 from sorter import find_subfolders_with_images, get_images_in_folder, rename_images_in_folder, process_folder
 from reporter import generate_report
@@ -586,6 +587,20 @@ class AutoPhotoSorterApp:
 
         # Генеруємо шлях до звіту автоматично в папці з фото
         output_report = os.path.join(input_dir, "report.xlsx")
+
+        # Встановлюємо користувацькі промти, якщо вони змінені
+        classify_prompt = self._classify_prompt.get().strip()
+        rank_prompt = self._rank_prompt.get().strip()
+        
+        # Встановлюємо тільки якщо відрізняються від стандартних
+        if classify_prompt != _CLASSIFY_PROMPT or rank_prompt != _RANK_PROMPT_TEMPLATE:
+            set_custom_prompts(
+                classify_prompt if classify_prompt != _CLASSIFY_PROMPT else None,
+                rank_prompt if rank_prompt != _RANK_PROMPT_TEMPLATE else None
+            )
+        else:
+            # Скинути до стандартних
+            set_custom_prompts(None, None)
 
         api = self._api_type.get()
         api_key = self._api_key.get().strip()
