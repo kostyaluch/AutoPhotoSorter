@@ -653,8 +653,8 @@ class AutoPhotoSorterApp:
             self._classify_prompt.set(classify_text.get("1.0", tk.END).strip())
             self._rank_prompt.set(rank_text.get("1.0", tk.END).strip())
             self._save_config()
-            messagebox.showinfo("Успіх", "Промти збережено успішно!")
             editor.destroy()
+            messagebox.showinfo("Успіх", "Промти збережено успішно!")
         
         def reset_prompts():
             if messagebox.askyesno("Підтвердження", "Скинути промти до значень за замовчуванням?"):
