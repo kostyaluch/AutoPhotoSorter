@@ -188,7 +188,11 @@ class AutoPhotoSorterApp:
         menu.add_command(label="Копіювати", command=lambda: self._copy_text_to_clipboard(text_widget))
         menu.add_command(label="Вставити", command=lambda: self._paste_text_from_clipboard(text_widget))
         menu.add_separator()
-        menu.add_command(label="Виділити все", command=lambda: text_widget.tag_add(tk.SEL, "1.0", tk.END) or "break")
+        
+        def select_all():
+            text_widget.tag_add(tk.SEL, "1.0", tk.END)
+        
+        menu.add_command(label="Виділити все", command=select_all)
         
         def show_menu(event):
             menu.tk_popup(event.x_root, event.y_root)
@@ -197,10 +201,26 @@ class AutoPhotoSorterApp:
     
     def _add_text_keyboard_shortcuts(self, text_widget) -> None:
         """Додає клавіатурні скорочення для Text widget."""
-        text_widget.bind('<Control-C>', lambda e: self._copy_text_to_clipboard(text_widget) or "break")
-        text_widget.bind('<Control-V>', lambda e: self._paste_text_from_clipboard(text_widget) or "break")
-        text_widget.bind('<Control-X>', lambda e: self._cut_text_to_clipboard(text_widget) or "break")
-        text_widget.bind('<Control-A>', lambda e: text_widget.tag_add(tk.SEL, "1.0", tk.END) or "break")
+        def copy_handler(e):
+            self._copy_text_to_clipboard(text_widget)
+            return "break"
+        
+        def paste_handler(e):
+            self._paste_text_from_clipboard(text_widget)
+            return "break"
+        
+        def cut_handler(e):
+            self._cut_text_to_clipboard(text_widget)
+            return "break"
+        
+        def select_all_handler(e):
+            text_widget.tag_add(tk.SEL, "1.0", tk.END)
+            return "break"
+        
+        text_widget.bind('<Control-C>', copy_handler)
+        text_widget.bind('<Control-V>', paste_handler)
+        text_widget.bind('<Control-X>', cut_handler)
+        text_widget.bind('<Control-A>', select_all_handler)
     
     def _copy_to_clipboard(self, entry_widget: ttk.Entry) -> None:
         """Копіює виділений текст з Entry widget в буфер обміну."""
@@ -254,10 +274,8 @@ class AutoPhotoSorterApp:
             if text_widget.tag_ranges(tk.SEL):
                 # Заміняємо виділений текст
                 text_widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
-                text_widget.insert(tk.INSERT, text)
-            else:
-                # Вставляємо в позицію курсора
-                text_widget.insert(tk.INSERT, text)
+            # Вставляємо в позицію курсора
+            text_widget.insert(tk.INSERT, text)
         except tk.TclError:
             pass
     
