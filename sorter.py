@@ -211,6 +211,11 @@ def process_folder(folder_path: str,
         # evaluate the full product set and decide the optimal display order.
         if api_type == "ollama" and ollama_url:
             n = len(images_data)
+            logger.info(
+                "process_folder(%s): Ollama вибрано, %d зображень для ранжування",
+                os.path.basename(folder_path),
+                n
+            )
             if 2 <= n <= OLLAMA_MAX_IMAGES_PER_RANK:
                 if progress_callback:
                     progress_callback(
