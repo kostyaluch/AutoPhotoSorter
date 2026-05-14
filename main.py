@@ -188,12 +188,19 @@ class AutoPhotoSorterApp:
         menu.add_command(label="Копіювати", command=lambda: self._copy_text_to_clipboard(text_widget))
         menu.add_command(label="Вставити", command=lambda: self._paste_text_from_clipboard(text_widget))
         menu.add_separator()
-        menu.add_command(label="Виділити все", command=lambda: text_widget.tag_add(tk.SEL, "1.0", tk.END))
+        menu.add_command(label="Виділити все", command=lambda: text_widget.tag_add(tk.SEL, "1.0", tk.END) or "break")
         
         def show_menu(event):
             menu.tk_popup(event.x_root, event.y_root)
         
         text_widget.bind('<Button-3>', show_menu)
+    
+    def _add_text_keyboard_shortcuts(self, text_widget) -> None:
+        """Додає клавіатурні скорочення для Text widget."""
+        text_widget.bind('<Control-C>', lambda e: self._copy_text_to_clipboard(text_widget) or "break")
+        text_widget.bind('<Control-V>', lambda e: self._paste_text_from_clipboard(text_widget) or "break")
+        text_widget.bind('<Control-X>', lambda e: self._cut_text_to_clipboard(text_widget) or "break")
+        text_widget.bind('<Control-A>', lambda e: text_widget.tag_add(tk.SEL, "1.0", tk.END) or "break")
     
     def _copy_to_clipboard(self, entry_widget: ttk.Entry) -> None:
         """Копіює виділений текст з Entry widget в буфер обміну."""
@@ -595,10 +602,7 @@ class AutoPhotoSorterApp:
         
         # Додаємо контекстне меню та keyboard shortcuts
         self._add_text_context_menu(classify_text)
-        classify_text.bind('<Control-C>', lambda e: self._copy_text_to_clipboard(classify_text) or "break")
-        classify_text.bind('<Control-V>', lambda e: self._paste_text_from_clipboard(classify_text) or "break")
-        classify_text.bind('<Control-X>', lambda e: self._cut_text_to_clipboard(classify_text) or "break")
-        classify_text.bind('<Control-A>', lambda e: classify_text.tag_add(tk.SEL, "1.0", tk.END) or "break")
+        self._add_text_keyboard_shortcuts(classify_text)
         
         # Промт ранжування
         rank_label = ttk.Label(
@@ -621,10 +625,7 @@ class AutoPhotoSorterApp:
         
         # Додаємо контекстне меню та keyboard shortcuts
         self._add_text_context_menu(rank_text)
-        rank_text.bind('<Control-C>', lambda e: self._copy_text_to_clipboard(rank_text) or "break")
-        rank_text.bind('<Control-V>', lambda e: self._paste_text_from_clipboard(rank_text) or "break")
-        rank_text.bind('<Control-X>', lambda e: self._cut_text_to_clipboard(rank_text) or "break")
-        rank_text.bind('<Control-A>', lambda e: rank_text.tag_add(tk.SEL, "1.0", tk.END) or "break")
+        self._add_text_keyboard_shortcuts(rank_text)
         
         # Кнопки
         btn_frame = ttk.Frame(frame)
