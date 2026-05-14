@@ -44,6 +44,7 @@ APP_VERSION = "1.0.0"
 WINDOW_MIN_WIDTH = 860
 WINDOW_MIN_HEIGHT = 700
 DEFAULT_GEOMETRY = "960x750"
+UI_INIT_DELAY_MS = 100  # Delay for UI initialization before binding clipboard events
 
 # Шлях до конфігураційного файлу
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".autophotosorter_config.json")
@@ -164,7 +165,6 @@ class AutoPhotoSorterApp:
                 bind_entry(child)
         
         # Wait for UI initialization before binding
-        UI_INIT_DELAY_MS = 100
         self.root.after(UI_INIT_DELAY_MS, lambda: bind_entry(self.root))
     
     def _add_context_menu(self, entry_widget: ttk.Entry) -> None:
@@ -594,16 +594,15 @@ class AutoPhotoSorterApp:
         # Генеруємо шлях до звіту автоматично в папці з фото
         output_report = os.path.join(input_dir, "report.xlsx")
 
-        # Встановлюємо користувацькі промти, якщо вони змінені
+        # Встановлюємо користувацькі промти (завжди встановлюємо поточні значення)
         classify_prompt = self._classify_prompt.get().strip()
         rank_prompt = self._rank_prompt.get().strip()
         
-        # Встановлюємо тільки якщо відрізняються від стандартних
-        if classify_prompt != _CLASSIFY_PROMPT or rank_prompt != _RANK_PROMPT_TEMPLATE:
-            set_custom_prompts(classify_prompt, rank_prompt)
-        else:
-            # Скинути до стандартних
-            set_custom_prompts(None, None)
+        # Передаємо None якщо промт відповідає стандартному (для економії пам'яті)
+        set_custom_prompts(
+            None if classify_prompt == _CLASSIFY_PROMPT else classify_prompt,
+            None if rank_prompt == _RANK_PROMPT_TEMPLATE else rank_prompt
+        )
 
         api = self._api_type.get()
         api_key = self._api_key.get().strip()

@@ -90,6 +90,7 @@ OLLAMA_MAX_IMAGES_PER_RANK = 20
 # Промти для AI (можуть бути змінені через set_custom_prompts)
 _current_classify_prompt = None
 _current_rank_prompt = None
+_prompt_lock = threading.Lock()
 
 def set_custom_prompts(classify_prompt: str | None = None, rank_prompt: str | None = None) -> None:
     """
@@ -100,16 +101,19 @@ def set_custom_prompts(classify_prompt: str | None = None, rank_prompt: str | No
       rank_prompt — промт для ранжування зображень (None = використати стандартний)
     """
     global _current_classify_prompt, _current_rank_prompt
-    _current_classify_prompt = classify_prompt
-    _current_rank_prompt = rank_prompt
+    with _prompt_lock:
+        _current_classify_prompt = classify_prompt
+        _current_rank_prompt = rank_prompt
 
 def _get_classify_prompt() -> str:
     """Повертає активний промт для класифікації."""
-    return _current_classify_prompt if _current_classify_prompt else _CLASSIFY_PROMPT
+    with _prompt_lock:
+        return _current_classify_prompt if _current_classify_prompt else _CLASSIFY_PROMPT
 
 def _get_rank_prompt_template() -> str:
     """Повертає активний шаблон промту для ранжування."""
-    return _current_rank_prompt if _current_rank_prompt else _RANK_PROMPT_TEMPLATE
+    with _prompt_lock:
+        return _current_rank_prompt if _current_rank_prompt else _RANK_PROMPT_TEMPLATE
 
 # ---------------------------------------------------------------------------
 # Константи категорій (порядок — пріоритет сортування)
