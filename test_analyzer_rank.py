@@ -40,8 +40,8 @@ class RankImagesWithOllamaTests(unittest.TestCase):
 
         payload = mocked_post.call_args.kwargs["json"]
         self.assertEqual(payload["options"], analyzer._RANK_GENERATION_OPTIONS)
-        self.assertIn("smooth visual progression of angles", payload["prompt"])
-        self.assertIn("keep their existing numeric order", payload["prompt"])
+        self.assertIn("smooth visual flow", payload["prompt"])
+        self.assertIn("Do NOT simply return [1, 2, 3, ...]", payload["prompt"])
 
 
 if __name__ == "__main__":
