@@ -96,10 +96,10 @@ class AutoPhotoSorterApp:
         self._stop_requested = False
         
         # Промти для AI
-        self._classify_prompt = tk.StringVar(value=_CLASSIFY_PROMPT)
-        self._rank_prompt = tk.StringVar(value=_RANK_PROMPT_TEMPLATE)
+        self._classify_prompt = tk.StringVar()
+        self._rank_prompt = tk.StringVar()
         
-        # Завантажити конфігурацію
+        # Завантажити конфігурацію (встановить промти з файлу або за замовчуванням)
         self._load_config()
 
         self._build_ui()
@@ -113,6 +113,10 @@ class AutoPhotoSorterApp:
     
     def _load_config(self) -> None:
         """Завантажує конфігурацію з файлу."""
+        # Встановлюємо значення за замовчуванням
+        self._classify_prompt.set(_CLASSIFY_PROMPT)
+        self._rank_prompt.set(_RANK_PROMPT_TEMPLATE)
+        
         if not os.path.exists(CONFIG_FILE):
             return
         
@@ -159,7 +163,9 @@ class AutoPhotoSorterApp:
             for child in widget.winfo_children():
                 bind_entry(child)
         
-        self.root.after(100, lambda: bind_entry(self.root))
+        # Wait for UI initialization before binding
+        UI_INIT_DELAY_MS = 100
+        self.root.after(UI_INIT_DELAY_MS, lambda: bind_entry(self.root))
     
     def _add_context_menu(self, entry_widget: ttk.Entry) -> None:
         """Додає контекстне меню з опціями копіювання/вставки до Entry widget."""
@@ -594,10 +600,7 @@ class AutoPhotoSorterApp:
         
         # Встановлюємо тільки якщо відрізняються від стандартних
         if classify_prompt != _CLASSIFY_PROMPT or rank_prompt != _RANK_PROMPT_TEMPLATE:
-            set_custom_prompts(
-                classify_prompt if classify_prompt != _CLASSIFY_PROMPT else None,
-                rank_prompt if rank_prompt != _RANK_PROMPT_TEMPLATE else None
-            )
+            set_custom_prompts(classify_prompt, rank_prompt)
         else:
             # Скинути до стандартних
             set_custom_prompts(None, None)

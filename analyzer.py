@@ -79,6 +79,10 @@ DEFAULT_OLLAMA_MODEL = os.environ.get(OLLAMA_MODEL_ENV_VAR, _DEFAULT_OLLAMA_MODE
 _OLLAMA_LOGGED_ISSUES: set[tuple[str, ...]] = set()
 _OLLAMA_LOGGED_ISSUES_LOCK = threading.Lock()
 
+# Ollama API endpoints
+OLLAMA_TAGS_ENDPOINT = "/api/tags"
+OLLAMA_GENERATE_ENDPOINT = "/api/generate"
+
 # Максимальна кількість зображень в одному запиті ранжування до Ollama.
 # Більше зображень — більший payload і час обробки.
 OLLAMA_MAX_IMAGES_PER_RANK = 20
@@ -400,7 +404,7 @@ def get_ollama_models(ollama_url: str | None) -> list[str]:
     ollama_url = _normalize_ollama_base_url(ollama_url)
     
     try:
-        endpoint = f"{ollama_url}/api/tags"
+        endpoint = f"{ollama_url}{OLLAMA_TAGS_ENDPOINT}"
         response = requests.get(endpoint, timeout=10)
         response.raise_for_status()
         
@@ -452,7 +456,7 @@ def classify_with_ollama(image_path: str, ollama_url: str | None, model_name: st
         if not img_b64:
             return None
 
-        endpoint = f"{ollama_url}/api/generate"
+        endpoint = f"{ollama_url}{OLLAMA_GENERATE_ENDPOINT}"
 
         payload = {
             "model": model_name,
@@ -695,7 +699,7 @@ def rank_images_with_ollama(
         example = list(range(2, n + 1)) + [1]
 
     prompt = _get_rank_prompt_template().format(n=n, example=example)
-    endpoint = f"{ollama_url}/api/generate"
+    endpoint = f"{ollama_url}{OLLAMA_GENERATE_ENDPOINT}"
 
     payload = {
         "model": model_name,
