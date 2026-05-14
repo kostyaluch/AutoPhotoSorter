@@ -152,6 +152,82 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
 MAX_WORDS_FOR_MAIN_CATEGORY = 6
 
 # ---------------------------------------------------------------------------
+# 0. CLIP pre-analysis config (concept prompts + rule thresholds)
+# ---------------------------------------------------------------------------
+
+# Кожна група містить кілька коротких текстових формулювань.
+# Фінальний score групи = усереднення score її промптів.
+CLIP_CONCEPT_PROMPTS: dict[str, list[str]] = {
+    "ideal_main_positive": [
+        "clean product photo on pure white background",
+        "single product isolated on white background",
+        "catalog product image with no text",
+        "marketplace main product photo",
+    ],
+    "text_overlay_negative": [
+        "product photo with text overlay",
+        "product image with promotional text",
+        "product photo with label or badge",
+        "product image with watermark or banner",
+    ],
+    "collage_negative": [
+        "collage of product photos",
+        "multi-panel product image",
+        "infographic product image",
+        "product image with multiple frames",
+    ],
+    "lifestyle_negative_or_gallery": [
+        "lifestyle product photo",
+        "product in real environment",
+        "product in use",
+        "contextual marketing photo",
+    ],
+    "white_background_positive": [
+        "product on pure white background",
+        "isolated object on white background",
+        "studio product shot on white",
+    ],
+    "single_product_positive": [
+        "single product centered in frame",
+        "one product object in image",
+        "single item catalog photo",
+    ],
+    "packaging_or_detail_gallery": [
+        "product packaging photo",
+        "close-up detail product photo",
+        "back side of product",
+        "side angle product photo",
+    ],
+}
+
+CLIP_SIGNAL_FIELD_MAP = {
+    "ideal_main_positive": "clip_ideal_main_score",
+    "text_overlay_negative": "clip_text_overlay_score",
+    "collage_negative": "clip_collage_score",
+    "lifestyle_negative_or_gallery": "clip_lifestyle_score",
+    "white_background_positive": "clip_white_bg_score",
+    "single_product_positive": "clip_single_product_score",
+    "packaging_or_detail_gallery": "clip_packaging_detail_score",
+}
+
+# Пороги винесено в окрему структуру для простішого подальшого тюнінгу.
+CLIP_RULE_THRESHOLDS = {
+    "clip_text_overlay_high": 0.62,
+    "clip_collage_high": 0.58,
+    "clip_lifestyle_high": 0.58,
+    "clip_white_bg_strong": 0.60,
+    "clip_single_product_strong": 0.56,
+    "clip_packaging_detail_high": 0.62,
+    "clip_level_high": 0.67,
+    "clip_level_medium": 0.45,
+    "opencv_white_bg_strong": 0.60,
+}
+
+# Температура для sigmoid(logits / temperature): 10.0 стискає крайні значення
+# CLIP-логітів у більш стабільний діапазон confidence 0..1.
+CLIP_LOGIT_TEMPERATURE_SCALING = 10.0
+
+# ---------------------------------------------------------------------------
 # 1. Визначення білого фону (OpenCV)
 # ---------------------------------------------------------------------------
 
@@ -557,6 +633,8 @@ _RANK_PROMPT_TEMPLATE = (
     "The photos are numbered 1 to {n} in the order they appear in the images array.\n\n"
     "IMPORTANT: Analyze each image carefully and reorder them optimally. "
     "Do NOT simply return [1, 2, 3, ...] - that would mean you didn't analyze them.\n\n"
+    "Use the provided PRE-ANALYSIS SIGNALS as guidance (white_bg, text_overlay, collage, "
+    "lifestyle, single_product, warnings), but you still make the FINAL ranking decision.\n\n"
     "=== STRICT CLASSIFICATION RULES ===\n\n"
     "IDEAL MAIN PHOTO (best candidate for position 1):\n"
     "  - Single product clearly visible\n"
@@ -649,10 +727,49 @@ def _parse_rank_response(text: str, n_images: int) -> list[int] | None:
     return [x - 1 for x in arr]
 
 
+def _classify_clip_score_level(
+    score: float,
+    high: float = CLIP_RULE_THRESHOLDS["clip_level_high"],
+    medium: float = CLIP_RULE_THRESHOLDS["clip_level_medium"],
+) -> str:
+    """Перетворює числовий score у high/medium/low для коротких Ollama summary."""
+    if score >= high:
+        return "high"
+    if score >= medium:
+        return "medium"
+    return "low"
+
+
+def _build_rank_preanalysis_block(image_summaries: list[dict] | None) -> str:
+    if not image_summaries:
+        return ""
+
+    lines = [
+        "=== PRE-ANALYSIS SIGNALS (use as strong hints, final order is your decision) ==="
+    ]
+    for idx, summary in enumerate(image_summaries, start=1):
+        white_bg_level = _classify_clip_score_level(float(summary.get("clip_white_bg_score", 0.0)))
+        single_level = _classify_clip_score_level(float(summary.get("clip_single_product_score", 0.0)))
+        text_overlay = "yes" if summary.get("has_text_overlay") else "no"
+        collage = "yes" if float(summary.get("clip_collage_score", 0.0)) >= CLIP_RULE_THRESHOLDS["clip_collage_high"] else "no"
+        lifestyle = "yes" if float(summary.get("clip_lifestyle_score", 0.0)) >= CLIP_RULE_THRESHOLDS["clip_lifestyle_high"] else "no"
+        ideal = "yes" if summary.get("is_ideal_main_eligible") else "no"
+        alternative = "yes" if summary.get("is_alternative_main_candidate") else "no"
+        warnings = summary.get("rule_warnings") or []
+        warnings_text = ",".join(warnings) if warnings else "none"
+        lines.append(
+            f"{idx}. white_bg:{white_bg_level}; text_overlay:{text_overlay}; collage:{collage}; "
+            f"lifestyle:{lifestyle}; single_product:{single_level}; ideal_candidate:{ideal}; "
+            f"alternative_candidate:{alternative}; warnings:{warnings_text}"
+        )
+    return "\n".join(lines) + "\n\n"
+
+
 def rank_images_with_ollama(
     image_paths: list[str],
     ollama_url: str | None,
     model_name: str = DEFAULT_OLLAMA_MODEL,
+    image_summaries: list[dict] | None = None,
 ) -> list[int] | None:
     """
     Ранжує набір зображень продукту через Ollama.
@@ -665,6 +782,8 @@ def rank_images_with_ollama(
                     OLLAMA_MAX_IMAGES_PER_RANK)
       ollama_url  — базовий URL Ollama API (наприклад, http://localhost:11434)
       model_name  — назва vision-моделі в Ollama (наприклад, "llava")
+      image_summaries — попередні CLIP/OCR/rule сигнали для кожного фото
+                        (той самий порядок, що й image_paths)
 
     Повертає список 0-based індексів — перестановку range(len(image_paths)) —
     де елемент з індексом 0 вказує на зображення, що має бути першим, і т.д.
@@ -731,7 +850,8 @@ def rank_images_with_ollama(
         # Для більших наборів - просто показуємо, що порядок має бути змінений
         example = list(range(2, min(6, n+1))) + [1] + list(range(6, n+1))
 
-    prompt = _get_rank_prompt_template().format(n=n, example=example)
+    prompt_base = _get_rank_prompt_template().format(n=n, example=example)
+    prompt = _build_rank_preanalysis_block(image_summaries) + prompt_base
     endpoint = f"{ollama_url}{OLLAMA_GENERATE_ENDPOINT}"
 
     payload = {
@@ -809,51 +929,169 @@ def rank_images_with_ollama(
 
 _CLIP_MODEL_CACHE: dict = {}  # {device: (model, preprocess)}
 
-_CLIP_TEXT_PROMPTS = [
-    "product photo on white or very light background, clear product showcase with good visibility, well-lit professional product photography, main product focus",
-    "product packshot on solid neutral background, different angle",
-    "close-up macro photo of product detail or material texture",
-    "product placed in interior living space, lifestyle photo",
-    "product with its packaging box and all accessories, kit contents",
-    "product infographic with text labels, dimensions and technical specs",
-]
+
+def _build_clip_prompt_index() -> dict[str, tuple[int, int]]:
+    prompt_index: dict[str, tuple[int, int]] = {}
+    start = 0
+    for group_name, group_prompts in CLIP_CONCEPT_PROMPTS.items():
+        end = start + len(group_prompts)
+        prompt_index[group_name] = (start, end)
+        start = end
+    return prompt_index
 
 
-def classify_with_clip(image_path: str) -> str | None:
+_CLIP_PROMPT_INDEX = _build_clip_prompt_index()
+_CLIP_ALL_PROMPTS = [p for prompts in CLIP_CONCEPT_PROMPTS.values() for p in prompts]
+
+# backward compatibility for GUI import
+_CLIP_TEXT_PROMPTS = _CLIP_ALL_PROMPTS
+_DEFAULT_CLIP_SIGNALS = {field: 0.0 for field in CLIP_SIGNAL_FIELD_MAP.values()}
+
+
+def get_default_clip_signals() -> dict[str, float]:
+    """Повертає нульові CLIP сигнали для стабільної структури результату."""
+    return _DEFAULT_CLIP_SIGNALS.copy()
+
+
+def analyze_clip_signals(image_path: str) -> dict[str, float]:
     """
-    Класифікує зображення за допомогою локальної CLIP моделі (без API).
-
-    При першому запуску завантажує модель ViT-B/32 (~350 MB).
-    Потрібні: pip install torch torchvision
-              pip install git+https://github.com/openai/CLIP.git
-
-    Повертає рядок категорії або None при помилці.
+    Обчислює агреговані CLIP сигнали для ключових візуальних концептів.
     """
     if not CLIP_AVAILABLE:
-        logger.error("torch/CLIP не встановлено.")
-        return None
+        return get_default_clip_signals()
+
     try:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
         if device not in _CLIP_MODEL_CACHE:
-            # ---- Модель: змініть 'ViT-B/32' на 'ViT-L/14' для кращої точності ----
             model, preprocess = clip_module.load("ViT-B/32", device=device)
             _CLIP_MODEL_CACHE[device] = (model, preprocess)
         else:
             model, preprocess = _CLIP_MODEL_CACHE[device]
 
-        image = preprocess(Image.open(image_path)).unsqueeze(0).to(device)
-        text_tokens = clip_module.tokenize(_CLIP_TEXT_PROMPTS).to(device)
+        with Image.open(image_path) as pil_image:
+            image = preprocess(pil_image).unsqueeze(0).to(device)
+        text_tokens = clip_module.tokenize(_CLIP_ALL_PROMPTS).to(device)
 
         with torch.no_grad():
-            logits, _ = model(image, text_tokens)
-            probs = logits.softmax(dim=-1).cpu().numpy()[0]
+            logits_per_image, _ = model(image, text_tokens)
+            logits = logits_per_image.cpu().numpy()[0]
+            # Логіти CLIP можуть мати широкий діапазон, тому застосовуємо
+            # temperature-scaled sigmoid: sigmoid(logits / temperature),
+            # де temperature = CLIP_LOGIT_TEMPERATURE_SCALING для стабільнішої шкали score 0..1.
+            prompt_scores = 1.0 / (
+                1.0 + np.exp(-logits / CLIP_LOGIT_TEMPERATURE_SCALING)
+            )
 
-        return CATEGORY_ORDER[int(np.argmax(probs))]
-
+        signals = get_default_clip_signals()
+        for group_name, field_name in CLIP_SIGNAL_FIELD_MAP.items():
+            start, end = _CLIP_PROMPT_INDEX[group_name]
+            if start < end:
+                signals[field_name] = float(np.mean(prompt_scores[start:end]))
+        return signals
     except Exception as exc:
-        logger.warning("classify_with_clip: %s", exc)
+        logger.warning("analyze_clip_signals: %s", exc)
+        return get_default_clip_signals()
+
+
+def apply_pre_analysis_rules(analysis: dict) -> dict:
+    """
+    Rule layer: визначає ідеальність/альтернативність/галерею до фінального ранжування.
+
+    Важливо: наявність тексту/оверлеїв блокує статус "ideal main photo".
+    """
+    has_text = bool(analysis.get("has_text", False))
+    white_bg_score = float(analysis.get("white_bg_score", 0.0))
+    clip_text_overlay_score = float(analysis.get("clip_text_overlay_score", 0.0))
+    clip_collage_score = float(analysis.get("clip_collage_score", 0.0))
+    clip_lifestyle_score = float(analysis.get("clip_lifestyle_score", 0.0))
+    clip_white_bg_score = float(analysis.get("clip_white_bg_score", 0.0))
+    clip_single_product_score = float(analysis.get("clip_single_product_score", 0.0))
+
+    text_overlay_detected = has_text or (
+        clip_text_overlay_score >= CLIP_RULE_THRESHOLDS["clip_text_overlay_high"]
+    )
+    collage_high = clip_collage_score >= CLIP_RULE_THRESHOLDS["clip_collage_high"]
+    lifestyle_high = clip_lifestyle_score >= CLIP_RULE_THRESHOLDS["clip_lifestyle_high"]
+
+    white_bg_strong = (
+        white_bg_score >= CLIP_RULE_THRESHOLDS["opencv_white_bg_strong"]
+        or clip_white_bg_score >= CLIP_RULE_THRESHOLDS["clip_white_bg_strong"]
+    )
+    single_product_strong = (
+        clip_single_product_score >= CLIP_RULE_THRESHOLDS["clip_single_product_strong"]
+    )
+
+    warnings: list[str] = []
+    rejection_reason = ""
+    if text_overlay_detected:
+        warnings.append("text_overlay_detected")
+        rejection_reason = "text_overlay_blocks_ideal_main"
+    elif collage_high:
+        warnings.append("collage_like_image")
+        rejection_reason = "collage_not_ideal_main"
+    elif lifestyle_high:
+        warnings.append("lifestyle_gallery_image")
+        rejection_reason = "lifestyle_not_ideal_main"
+    elif not white_bg_strong:
+        rejection_reason = "background_not_white_enough"
+    elif not single_product_strong:
+        rejection_reason = "single_product_signal_weak"
+
+    is_ideal_main_eligible = (
+        white_bg_strong
+        and single_product_strong
+        and not text_overlay_detected
+        and not collage_high
+        and not lifestyle_high
+    )
+    is_alternative_main_candidate = (
+        white_bg_strong
+        and single_product_strong
+        and text_overlay_detected
+        and not collage_high
+    )
+    is_gallery_candidate = (
+        collage_high
+        or lifestyle_high
+        or (not is_ideal_main_eligible and not is_alternative_main_candidate)
+    )
+
+    return {
+        "is_ideal_main_eligible": is_ideal_main_eligible,
+        "is_alternative_main_candidate": is_alternative_main_candidate,
+        "is_gallery_candidate": is_gallery_candidate,
+        "has_text_overlay": text_overlay_detected,
+        "rule_warnings": warnings,
+        "rejection_reason": rejection_reason,
+    }
+
+
+def classify_with_clip(image_path: str) -> str | None:
+    """
+    Класифікує зображення за локальною CLIP моделлю, використовуючи concept scores.
+    """
+    signals = analyze_clip_signals(image_path)
+    if not CLIP_AVAILABLE:
+        logger.error("torch/CLIP не встановлено.")
         return None
+
+    text_overlay = signals["clip_text_overlay_score"] >= CLIP_RULE_THRESHOLDS["clip_text_overlay_high"]
+    collage = signals["clip_collage_score"] >= CLIP_RULE_THRESHOLDS["clip_collage_high"]
+    lifestyle = signals["clip_lifestyle_score"] >= CLIP_RULE_THRESHOLDS["clip_lifestyle_high"]
+    white_bg = signals["clip_white_bg_score"] >= CLIP_RULE_THRESHOLDS["clip_white_bg_strong"]
+    single_product = signals["clip_single_product_score"] >= CLIP_RULE_THRESHOLDS["clip_single_product_strong"]
+    packaging_detail = signals["clip_packaging_detail_score"]
+
+    if collage or text_overlay:
+        return CATEGORY_INFOGRAPHIC
+    if lifestyle:
+        return CATEGORY_LIFESTYLE
+    if packaging_detail >= CLIP_RULE_THRESHOLDS["clip_packaging_detail_high"] and not white_bg:
+        return CATEGORY_DETAIL
+    if white_bg and single_product and not text_overlay:
+        return CATEGORY_MAIN
+    return CATEGORY_PACKSHOT
 
 
 # ---------------------------------------------------------------------------
@@ -867,7 +1105,8 @@ def classify_image(image_path: str,
                    ollama_model: str = DEFAULT_OLLAMA_MODEL,
                    white_bg_score: float = 0.0,
                    has_text: bool = False,
-                   detected_text: str = "") -> tuple[str, float, str]:
+                   detected_text: str = "",
+                   clip_signals: dict | None = None) -> tuple[str, float, str]:
     """
     Визначає категорію зображення.
 
@@ -877,11 +1116,18 @@ def classify_image(image_path: str,
       ollama_url — URL Ollama API (для ollama)
       ollama_model — назва моделі в Ollama (для ollama)
       white_bg_score, has_text, detected_text — результати OpenCV/OCR аналізу
+      clip_signals — словник CLIP concept scores
 
     Повертає (category, confidence, method_used).
     """
     ai_category: str | None = None
     method = "opencv"
+    resolved_clip_signals = clip_signals or get_default_clip_signals()
+    pre_rules = apply_pre_analysis_rules({
+        "white_bg_score": white_bg_score,
+        "has_text": has_text,
+        **resolved_clip_signals,
+    })
 
     # --- Спроба AI класифікації ---
     if api_type == "gemini" and api_key:
@@ -906,7 +1152,9 @@ def classify_image(image_path: str,
         # Якщо AI каже "main", але OCR виявив будь-який текст — понижуємо до packshot.
         # Наявність тексту, плашок або водяних знаків є блокуючою умовою для
         # "ідеального головного фото". Такі фото класифікуються як альтернативні.
-        if ai_category == CATEGORY_MAIN and has_text:
+        # Пріоритет має pre_rules["has_text_overlay"], бо він поєднує OCR + CLIP
+        # (а не лише сирий OCR прапорець has_text).
+        if ai_category == CATEGORY_MAIN and pre_rules["has_text_overlay"]:
             ai_category = CATEGORY_PACKSHOT
         return ai_category, 1.0, method
 
@@ -919,6 +1167,11 @@ def classify_image(image_path: str,
             return CATEGORY_INFOGRAPHIC, 0.6, method
         else:
             return CATEGORY_PACKSHOT, 0.5, method
+
+    if pre_rules["is_gallery_candidate"] and resolved_clip_signals["clip_collage_score"] >= CLIP_RULE_THRESHOLDS["clip_collage_high"]:
+        return CATEGORY_INFOGRAPHIC, 0.6, method
+    if pre_rules["is_gallery_candidate"] and resolved_clip_signals["clip_lifestyle_score"] >= CLIP_RULE_THRESHOLDS["clip_lifestyle_high"]:
+        return CATEGORY_LIFESTYLE, 0.6, method
 
     # Налаштування порогів:
     #   WHITE_BG_HIGH   — поріг для ідеального білого фону (main)
@@ -953,9 +1206,13 @@ def analyze_image(image_path: str,
       white_bg_score — оцінка білизни фону (0.0–1.0)
       has_text       — чи виявлено текст
       detected_text  — знайдений текст
+      clip_*_score   — агреговані CLIP concept scores
+      is_ideal_main_eligible / is_alternative_main_candidate / is_gallery_candidate
+                     — прапорці rule-layer перед Ollama
       method         — метод класифікації
       error          — рядок помилки або None
     """
+    default_clip = get_default_clip_signals()
     result: dict = {
         "path": image_path,
         "filename": os.path.basename(image_path),
@@ -963,6 +1220,13 @@ def analyze_image(image_path: str,
         "white_bg_score": 0.0,
         "has_text": False,
         "detected_text": "",
+        **default_clip,
+        "is_ideal_main_eligible": False,
+        "is_alternative_main_candidate": False,
+        "is_gallery_candidate": False,
+        "has_text_overlay": False,
+        "rule_warnings": [],
+        "rejection_reason": "",
         "method": "opencv",
         "error": None,
     }
@@ -978,6 +1242,9 @@ def analyze_image(image_path: str,
 
         result["white_bg_score"] = detect_white_background(image_path)
         result["has_text"], result["detected_text"] = detect_text_or_watermarks(image_path)
+        clip_signals = analyze_clip_signals(image_path)
+        result.update(clip_signals)
+        result.update(apply_pre_analysis_rules(result))
 
         category, confidence, method = classify_image(
             image_path,
@@ -988,6 +1255,7 @@ def analyze_image(image_path: str,
             white_bg_score=result["white_bg_score"],
             has_text=result["has_text"],
             detected_text=result["detected_text"],
+            clip_signals=clip_signals,
         )
         result["category"] = category
         result["confidence"] = confidence
