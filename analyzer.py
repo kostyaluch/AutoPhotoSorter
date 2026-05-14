@@ -79,9 +79,41 @@ DEFAULT_OLLAMA_MODEL = os.environ.get(OLLAMA_MODEL_ENV_VAR, _DEFAULT_OLLAMA_MODE
 _OLLAMA_LOGGED_ISSUES: set[tuple[str, ...]] = set()
 _OLLAMA_LOGGED_ISSUES_LOCK = threading.Lock()
 
+# Ollama API endpoints
+OLLAMA_TAGS_ENDPOINT = "/api/tags"
+OLLAMA_GENERATE_ENDPOINT = "/api/generate"
+
 # Максимальна кількість зображень в одному запиті ранжування до Ollama.
 # Більше зображень — більший payload і час обробки.
 OLLAMA_MAX_IMAGES_PER_RANK = 20
+
+# Промти для AI (можуть бути змінені через set_custom_prompts)
+_current_classify_prompt = None
+_current_rank_prompt = None
+_prompt_lock = threading.Lock()
+
+def set_custom_prompts(classify_prompt: str | None = None, rank_prompt: str | None = None) -> None:
+    """
+    Встановлює користувацькі промти для класифікації та ранжування.
+    
+    Параметри:
+      classify_prompt — промт для класифікації зображень (None = використати стандартний)
+      rank_prompt — промт для ранжування зображень (None = використати стандартний)
+    """
+    global _current_classify_prompt, _current_rank_prompt
+    with _prompt_lock:
+        _current_classify_prompt = classify_prompt
+        _current_rank_prompt = rank_prompt
+
+def _get_classify_prompt() -> str:
+    """Повертає активний промт для класифікації."""
+    with _prompt_lock:
+        return _current_classify_prompt if _current_classify_prompt else _CLASSIFY_PROMPT
+
+def _get_rank_prompt_template() -> str:
+    """Повертає активний шаблон промту для ранжування."""
+    with _prompt_lock:
+        return _current_rank_prompt if _current_rank_prompt else _RANK_PROMPT_TEMPLATE
 
 # ---------------------------------------------------------------------------
 # Константи категорій (порядок — пріоритет сортування)
@@ -270,7 +302,7 @@ def classify_with_gemini(image_path: str, api_key: str) -> str | None:
         # ---- Модель: змініть тут за потреби ----
         model = genai.GenerativeModel("gemini-1.5-flash")
         img = Image.open(image_path)
-        response = model.generate_content([_CLASSIFY_PROMPT, img])
+        response = model.generate_content([_get_classify_prompt(), img])
         return _parse_ai_response(response.text)
     except Exception as exc:
         logger.warning("classify_with_gemini: %s", exc)
@@ -307,7 +339,7 @@ def classify_with_openai(image_path: str, api_key: str) -> str | None:
             messages=[{
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": _CLASSIFY_PROMPT},
+                    {"type": "text", "text": _get_classify_prompt()},
                     {"type": "image_url",
                      "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
                 ],
@@ -356,6 +388,45 @@ def _log_ollama_issue_once(issue_key: tuple[str, ...], message: str, *args) -> N
     logger.warning(message, *args)
 
 
+def get_ollama_models(ollama_url: str | None) -> list[str]:
+    """
+    Отримує список доступних моделей з Ollama.
+    
+    Параметри:
+      ollama_url — URL Ollama API (наприклад, http://localhost:11434)
+    
+    Повертає список назв моделей або порожній список при помилці.
+    """
+    if not REQUESTS_AVAILABLE:
+        logger.error("requests не встановлено. Виконайте: pip install requests")
+        return []
+    
+    if not ollama_url:
+        logger.error("Ollama URL не вказано")
+        return []
+    
+    ollama_url = _normalize_ollama_base_url(ollama_url)
+    
+    try:
+        endpoint = f"{ollama_url}{OLLAMA_TAGS_ENDPOINT}"
+        response = requests.get(endpoint, timeout=10)
+        response.raise_for_status()
+        
+        result = response.json()
+        models = result.get("models", [])
+        
+        # Повертаємо список назв моделей
+        model_names = []
+        for model in models:
+            if isinstance(model, dict) and "name" in model:
+                model_names.append(model["name"])
+        
+        return sorted(model_names)
+    except Exception as exc:
+        logger.warning("get_ollama_models: Помилка отримання списку моделей з %s: %s", ollama_url, exc)
+        return []
+
+
 def classify_with_ollama(image_path: str, ollama_url: str | None, model_name: str = DEFAULT_OLLAMA_MODEL) -> str | None:
     """
     Класифікує зображення через Ollama (локальні моделі).
@@ -389,11 +460,11 @@ def classify_with_ollama(image_path: str, ollama_url: str | None, model_name: st
         if not img_b64:
             return None
 
-        endpoint = f"{ollama_url}/api/generate"
+        endpoint = f"{ollama_url}{OLLAMA_GENERATE_ENDPOINT}"
 
         payload = {
             "model": model_name,
-            "prompt": _CLASSIFY_PROMPT,
+            "prompt": _get_classify_prompt(),
             "images": [img_b64],
             "stream": False
         }
@@ -631,8 +702,8 @@ def rank_images_with_ollama(
     else:
         example = list(range(2, n + 1)) + [1]
 
-    prompt = _RANK_PROMPT_TEMPLATE.format(n=n, example=example)
-    endpoint = f"{ollama_url}/api/generate"
+    prompt = _get_rank_prompt_template().format(n=n, example=example)
+    endpoint = f"{ollama_url}{OLLAMA_GENERATE_ENDPOINT}"
 
     payload = {
         "model": model_name,
