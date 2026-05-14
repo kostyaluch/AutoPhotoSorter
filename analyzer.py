@@ -1083,7 +1083,11 @@ def classify_with_clip(image_path: str) -> str | None:
     single_product = signals["clip_single_product_score"] >= CLIP_RULE_THRESHOLDS["clip_single_product_strong"]
     packaging_detail = signals["clip_packaging_detail_score"]
 
-    if collage or text_overlay:
+    # Infographic requires BOTH collage/multi-panel AND text overlay, or very high scores
+    # This prevents regular product photos with small text from being classified as infographics
+    if (collage and text_overlay) or \
+       (signals["clip_collage_score"] >= CLIP_RULE_THRESHOLDS["clip_level_high"]) or \
+       (signals["clip_text_overlay_score"] >= CLIP_RULE_THRESHOLDS["clip_level_high"]):
         return CATEGORY_INFOGRAPHIC
     if lifestyle:
         return CATEGORY_LIFESTYLE
