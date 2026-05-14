@@ -181,6 +181,47 @@ class AutoPhotoSorterApp:
         
         entry_widget.bind('<Button-3>', show_menu)
     
+    def _add_text_context_menu(self, text_widget) -> None:
+        """Додає контекстне меню з опціями копіювання/вставки до Text widget."""
+        menu = tk.Menu(text_widget, tearoff=0)
+        menu.add_command(label="Вирізати", command=lambda: self._cut_text_to_clipboard(text_widget))
+        menu.add_command(label="Копіювати", command=lambda: self._copy_text_to_clipboard(text_widget))
+        menu.add_command(label="Вставити", command=lambda: self._paste_text_from_clipboard(text_widget))
+        menu.add_separator()
+        
+        def select_all():
+            text_widget.tag_add(tk.SEL, "1.0", tk.END)
+        
+        menu.add_command(label="Виділити все", command=select_all)
+        
+        def show_menu(event):
+            menu.tk_popup(event.x_root, event.y_root)
+        
+        text_widget.bind('<Button-3>', show_menu)
+    
+    def _add_text_keyboard_shortcuts(self, text_widget) -> None:
+        """Додає клавіатурні скорочення для Text widget."""
+        def copy_handler(e):
+            self._copy_text_to_clipboard(text_widget)
+            return "break"
+        
+        def paste_handler(e):
+            self._paste_text_from_clipboard(text_widget)
+            return "break"
+        
+        def cut_handler(e):
+            self._cut_text_to_clipboard(text_widget)
+            return "break"
+        
+        def select_all_handler(e):
+            text_widget.tag_add(tk.SEL, "1.0", tk.END)
+            return "break"
+        
+        text_widget.bind('<Control-C>', copy_handler)
+        text_widget.bind('<Control-V>', paste_handler)
+        text_widget.bind('<Control-X>', cut_handler)
+        text_widget.bind('<Control-A>', select_all_handler)
+    
     def _copy_to_clipboard(self, entry_widget: ttk.Entry) -> None:
         """Копіює виділений текст з Entry widget в буфер обміну."""
         try:
@@ -202,6 +243,39 @@ class AutoPhotoSorterApp:
                 start = entry_widget.index(tk.SEL_FIRST)
                 end = entry_widget.index(tk.SEL_LAST)
                 entry_widget.delete(start, end)
+        except tk.TclError:
+            pass
+    
+    def _copy_text_to_clipboard(self, text_widget) -> None:
+        """Копіює виділений текст з Text widget в буфер обміну."""
+        try:
+            if text_widget.tag_ranges(tk.SEL):
+                text = text_widget.get(tk.SEL_FIRST, tk.SEL_LAST)
+                self.root.clipboard_clear()
+                self.root.clipboard_append(text)
+        except tk.TclError:
+            pass
+    
+    def _cut_text_to_clipboard(self, text_widget) -> None:
+        """Вирізає виділений текст з Text widget в буфер обміну."""
+        try:
+            if text_widget.tag_ranges(tk.SEL):
+                text = text_widget.get(tk.SEL_FIRST, tk.SEL_LAST)
+                self.root.clipboard_clear()
+                self.root.clipboard_append(text)
+                text_widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
+        except tk.TclError:
+            pass
+    
+    def _paste_text_from_clipboard(self, text_widget) -> None:
+        """Вставляє текст з буфера обміну в Text widget."""
+        try:
+            text = self.root.clipboard_get()
+            if text_widget.tag_ranges(tk.SEL):
+                # Заміняємо виділений текст
+                text_widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
+            # Вставляємо в позицію курсора
+            text_widget.insert(tk.INSERT, text)
         except tk.TclError:
             pass
     
@@ -352,12 +426,25 @@ class AutoPhotoSorterApp:
         prompts_frame.columnconfigure(0, weight=1)
         row += 1
         
-        # Кнопка для відкриття редактора промтів
+        # Опис поточних промтів
+        prompts_info = ttk.Frame(prompts_frame)
+        prompts_info.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        prompts_info.columnconfigure(0, weight=1)
+        
+        ttk.Label(
+            prompts_info, 
+            text="Промти використовуються для класифікації та ранжування зображень",
+            font=("Helvetica", 9),
+            foreground="#666666"
+        ).grid(row=0, column=0, sticky="w")
+        
+        # Кнопка для відкриття редактора промтів - компактна
         ttk.Button(
-            prompts_frame, 
-            text="📝 Редагувати промти для класифікації та ранжування",
-            command=self._open_prompt_editor
-        ).grid(row=0, column=0, sticky="ew", pady=2)
+            prompts_info, 
+            text="📝 Редагувати промти",
+            command=self._open_prompt_editor,
+            width=25
+        ).grid(row=0, column=1, sticky="e", padx=(10, 0))
 
         # --- Опції ---
         opts_frame = ttk.Frame(outer)
@@ -502,33 +589,61 @@ class AutoPhotoSorterApp:
         """Відкриває вікно редагування промтів."""
         editor = tk.Toplevel(self.root)
         editor.title("Редагування промтів AI")
-        editor.geometry("800x600")
+        editor.geometry("900x700")
         editor.transient(self.root)
         
         # Фрейм для промтів
-        frame = ttk.Frame(editor, padding=10)
+        frame = ttk.Frame(editor, padding=15)
         frame.pack(fill=tk.BOTH, expand=True)
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(1, weight=1)
         frame.rowconfigure(3, weight=1)
         
         # Промт класифікації
-        ttk.Label(frame, text="Промт для класифікації зображень:", font=("Helvetica", 10, "bold")).grid(
-            row=0, column=0, sticky="w", pady=(0, 4)
+        classify_label = ttk.Label(
+            frame, 
+            text="Промт для класифікації зображень:", 
+            font=("Helvetica", 11, "bold")
         )
+        classify_label.grid(row=0, column=0, sticky="w", pady=(0, 6))
         
-        classify_text = scrolledtext.ScrolledText(frame, height=10, wrap=tk.WORD, font=("Courier", 9))
-        classify_text.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
+        classify_text = scrolledtext.ScrolledText(
+            frame, 
+            height=12, 
+            wrap=tk.WORD, 
+            font=("Courier", 10),
+            padx=5,
+            pady=5
+        )
+        classify_text.grid(row=1, column=0, sticky="nsew", pady=(0, 15))
         classify_text.insert("1.0", self._classify_prompt.get())
         
-        # Промт ранжування
-        ttk.Label(frame, text="Промт для ранжування зображень:", font=("Helvetica", 10, "bold")).grid(
-            row=2, column=0, sticky="w", pady=(0, 4)
-        )
+        # Додаємо контекстне меню та keyboard shortcuts
+        self._add_text_context_menu(classify_text)
+        self._add_text_keyboard_shortcuts(classify_text)
         
-        rank_text = scrolledtext.ScrolledText(frame, height=10, wrap=tk.WORD, font=("Courier", 9))
-        rank_text.grid(row=3, column=0, sticky="nsew", pady=(0, 10))
+        # Промт ранжування
+        rank_label = ttk.Label(
+            frame, 
+            text="Промт для ранжування зображень:", 
+            font=("Helvetica", 11, "bold")
+        )
+        rank_label.grid(row=2, column=0, sticky="w", pady=(0, 6))
+        
+        rank_text = scrolledtext.ScrolledText(
+            frame, 
+            height=12, 
+            wrap=tk.WORD, 
+            font=("Courier", 10),
+            padx=5,
+            pady=5
+        )
+        rank_text.grid(row=3, column=0, sticky="nsew", pady=(0, 15))
         rank_text.insert("1.0", self._rank_prompt.get())
+        
+        # Додаємо контекстне меню та keyboard shortcuts
+        self._add_text_context_menu(rank_text)
+        self._add_text_keyboard_shortcuts(rank_text)
         
         # Кнопки
         btn_frame = ttk.Frame(frame)
@@ -539,6 +654,7 @@ class AutoPhotoSorterApp:
             self._rank_prompt.set(rank_text.get("1.0", tk.END).strip())
             self._save_config()
             editor.destroy()
+            messagebox.showinfo("Успіх", "Промти збережено успішно!")
         
         def reset_prompts():
             if messagebox.askyesno("Підтвердження", "Скинути промти до значень за замовчуванням?"):
@@ -547,9 +663,9 @@ class AutoPhotoSorterApp:
                 rank_text.delete("1.0", tk.END)
                 rank_text.insert("1.0", _RANK_PROMPT_TEMPLATE)
         
-        ttk.Button(btn_frame, text="💾 Зберегти", command=save_prompts, width=15).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="🔄 Скинути", command=reset_prompts, width=15).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="❌ Скасувати", command=editor.destroy, width=15).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="💾 Зберегти", command=save_prompts, width=18).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="🔄 Скинути", command=reset_prompts, width=18).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="❌ Скасувати", command=editor.destroy, width=18).pack(side=tk.LEFT, padx=5)
 
     def _clear_log(self) -> None:
         self._log_box.config(state="normal")
