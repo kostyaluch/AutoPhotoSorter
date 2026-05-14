@@ -356,6 +356,45 @@ def _log_ollama_issue_once(issue_key: tuple[str, ...], message: str, *args) -> N
     logger.warning(message, *args)
 
 
+def get_ollama_models(ollama_url: str | None) -> list[str]:
+    """
+    Отримує список доступних моделей з Ollama.
+    
+    Параметри:
+      ollama_url — URL Ollama API (наприклад, http://localhost:11434)
+    
+    Повертає список назв моделей або порожній список при помилці.
+    """
+    if not REQUESTS_AVAILABLE:
+        logger.error("requests не встановлено. Виконайте: pip install requests")
+        return []
+    
+    if not ollama_url:
+        logger.error("Ollama URL не вказано")
+        return []
+    
+    ollama_url = _normalize_ollama_base_url(ollama_url)
+    
+    try:
+        endpoint = f"{ollama_url}/api/tags"
+        response = requests.get(endpoint, timeout=10)
+        response.raise_for_status()
+        
+        result = response.json()
+        models = result.get("models", [])
+        
+        # Повертаємо список назв моделей
+        model_names = []
+        for model in models:
+            if isinstance(model, dict) and "name" in model:
+                model_names.append(model["name"])
+        
+        return sorted(model_names)
+    except Exception as exc:
+        logger.warning("get_ollama_models: Помилка отримання списку моделей з %s: %s", ollama_url, exc)
+        return []
+
+
 def classify_with_ollama(image_path: str, ollama_url: str | None, model_name: str = DEFAULT_OLLAMA_MODEL) -> str | None:
     """
     Класифікує зображення через Ollama (локальні моделі).

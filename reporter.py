@@ -252,7 +252,7 @@ def generate_report(results: list[dict], output_path: str) -> str:
 
     Параметри:
       results     — список словників, повернутих process_folder()
-      output_path — шлях до файлу .xlsx (буде перезаписано)
+      output_path — шлях до файлу .xlsx (якщо файл існує, буде створено новий з міткою часу)
 
     Повертає абсолютний шлях до збереженого файлу.
     """
@@ -268,7 +268,19 @@ def generate_report(results: list[dict], output_path: str) -> str:
     # Встановлюємо активний аркуш на перший
     wb.active = ws_summary
 
-    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    wb.save(output_path)
-    logger.info("Звіт збережено: %s", output_path)
-    return os.path.abspath(output_path)
+    # Якщо файл вже існує, створюємо новий з міткою часу
+    final_path = output_path
+    if os.path.exists(output_path):
+        base_dir = os.path.dirname(os.path.abspath(output_path))
+        base_name = os.path.basename(output_path)
+        name_without_ext, ext = os.path.splitext(base_name)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        new_name = f"{name_without_ext}_{timestamp}{ext}"
+        final_path = os.path.join(base_dir, new_name)
+        logger.info("Файл %s вже існує. Створюємо новий файл: %s", output_path, final_path)
+
+    os.makedirs(os.path.dirname(os.path.abspath(final_path)), exist_ok=True)
+    wb.save(final_path)
+    logger.info("Звіт збережено: %s", final_path)
+    return os.path.abspath(final_path)
