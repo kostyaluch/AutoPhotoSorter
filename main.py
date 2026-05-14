@@ -842,6 +842,13 @@ class AutoPhotoSorterApp:
 
                 if result.get("has_ideal_main"):
                     self._log("   ✅  Ідеальне головне фото знайдено", "success")
+                elif result.get("has_alternative_main"):
+                    alt_img = result.get("alternative_main_image") or {}
+                    self._log(
+                        f"   ⚠️  Знайдено альтернативне головне фото (має текст/плашки, "
+                        f"потребує обробки): {alt_img.get('filename', 'N/A')}",
+                        "warning",
+                    )
                 elif result.get("fallback_used"):
                     fb = result.get("fallback_image") or {}
                     self._log(

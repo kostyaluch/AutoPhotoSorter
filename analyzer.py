@@ -553,30 +553,40 @@ def classify_with_ollama(image_path: str, ollama_url: str | None, model_name: st
 
 _RANK_PROMPT_TEMPLATE = (
     "You are a professional e-commerce photo editor deciding the display order "
-    "for {n} product photos.\n"
+    "for {n} product photos on a marketplace.\n"
     "The photos are numbered 1 to {n} in the order they appear in the images array.\n\n"
     "IMPORTANT: Analyze each image carefully and reorder them optimally. "
     "Do NOT simply return [1, 2, 3, ...] - that would mean you didn't analyze them.\n\n"
-    "Sort them using these priority rules (in order of importance):\n\n"
-    "1. FIRST - Main product shots (white/light background):\n"
-    "   a) Cleanest shots with minimal or no text/branding (hero shot)\n"
-    "   b) Shots with small logo or brand name visible\n"
-    "   c) Other white background angles\n"
-    "   → Within this group, prefer cleaner/simpler composition over branded\n\n"
-    "2. THEN - Packshots (solid/neutral backgrounds, different angles):\n"
-    "   → Keep smooth visual progression around the product\n\n"
-    "3. THEN - Detail shots (close-ups, textures, materials, features):\n"
-    "   → Images showing adjustment knobs, material details, etc.\n\n"
-    "4. THEN - Lifestyle photos (product in real-life context):\n"
-    "   → Product being used, with people, in environment\n\n"
-    "5. THEN - Kit photos (with box, packaging, accessories):\n\n"
-    "6. LAST - Infographic photos:\n"
-    "   → Heavy text overlays, dimensions, specs, diagrams\n"
-    "   → More text = later in sequence\n\n"
-    "Additional rules:\n"
-    "- Within any category, images with LESS text should come BEFORE images with more text\n"
-    "- Prioritize clean, professional shots over busy/crowded compositions\n"
-    "- For angle variations, create smooth visual flow (no sudden jumps)\n\n"
+    "=== STRICT CLASSIFICATION RULES ===\n\n"
+    "IDEAL MAIN PHOTO (best candidate for position 1):\n"
+    "  - Single product clearly visible\n"
+    "  - Pure white or very light, clean background\n"
+    "  - Absolutely NO text of any kind: no labels, no badges, no promotional text,\n"
+    "    no watermarks, no brand name overlay, no price tags, no banners, no stickers\n"
+    "  - No collages, no multiple products side by side, no extra decorative graphics\n"
+    "  → ALWAYS place first if such a photo exists\n\n"
+    "ALTERNATIVE MAIN PHOTO (second priority — needs additional editing):\n"
+    "  - White or light background (mostly clean)\n"
+    "  - BUT has any text, promotional labels, price badges, watermarks,\n"
+    "    brand overlays, stickers, or graphic overlays of any kind\n"
+    "  - Cannot be used as marketplace main image without processing to remove text\n"
+    "  → Place after any ideal main photos, before gallery images\n\n"
+    "GALLERY / ADDITIONAL PHOTOS (remaining positions in this order):\n"
+    "  3. Packshots — product on solid/neutral non-white background, different angles\n"
+    "  4. Detail shots — close-ups of materials, textures, product features\n"
+    "  5. Lifestyle photos — product in use, with people, in real environment\n"
+    "  6. Kit photos — product with packaging, box, all included accessories\n"
+    "  7. Infographic photos — heavy text overlays, dimensions, technical specs, diagrams\n\n"
+    "=== ORDERING RULES ===\n"
+    "1. FIRST: Ideal main photo (pure white bg, absolutely no text, single product)\n"
+    "2. THEN: Alternative main photos (white bg + any text/overlay — best quality first)\n"
+    "3. THEN: Packshots on non-white backgrounds\n"
+    "4. THEN: Detail shots (close-ups, textures, features)\n"
+    "5. THEN: Lifestyle photos — smooth visual flow from product to usage context\n"
+    "6. THEN: Kit photos (product with box and accessories)\n"
+    "7. LAST: Infographic photos (more text = later position)\n\n"
+    "Within each group: prefer cleaner, better-lit, higher-quality photos first.\n"
+    "Images with LESS text should always come BEFORE images with more text.\n\n"
     "Respond with ONLY a JSON array of the photo numbers in your preferred order.\n"
     "All {n} numbers from 1 to {n} must appear exactly once.\n"
     "Example format: {example}\n"
@@ -893,12 +903,11 @@ def classify_image(image_path: str,
 
     # --- Поєднання AI результату з OpenCV/OCR ---
     if ai_category:
-        # Якщо AI каже "main", але OCR знайшов багато тексту — понижуємо до packshot
-        # Малі логотипи або брендування (до MAX_WORDS_FOR_MAIN_CATEGORY слів) приймаються
-        if ai_category == CATEGORY_MAIN and has_text and detected_text:
-            word_count = len(detected_text.split())
-            if word_count > MAX_WORDS_FOR_MAIN_CATEGORY:
-                ai_category = CATEGORY_PACKSHOT
+        # Якщо AI каже "main", але OCR виявив будь-який текст — понижуємо до packshot.
+        # Наявність тексту, плашок або водяних знаків є блокуючою умовою для
+        # "ідеального головного фото". Такі фото класифікуються як альтернативні.
+        if ai_category == CATEGORY_MAIN and has_text:
+            ai_category = CATEGORY_PACKSHOT
         return ai_category, 1.0, method
 
     # --- Резервна класифікація лише на основі OpenCV + OCR ---
