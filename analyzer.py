@@ -555,30 +555,40 @@ _RANK_PROMPT_TEMPLATE = (
     "You are a professional e-commerce photo editor deciding the display order "
     "for {n} product photos.\n"
     "The photos are numbered 1 to {n} in the order they appear in the images array.\n\n"
-    "The key goal is to produce a stable and predictable sequence of frames/angles.\n"
-    "Sort them using these priority rules:\n"
-    "1. FIRST: product on a white/light background, clean, well-lit, "
-    "product clearly visible (main shot)\n"
-    "2. THEN: other shots on a solid/neutral background (different angles)\n"
-    "3. THEN: close-up detail shots (textures, materials, features)\n"
-    "4. THEN: lifestyle photos (product in an interior or real-life use context)\n"
-    "5. THEN: kit photos (product shown with box, packaging, or accessories)\n"
-    "6. LAST: infographic photos (text overlays, dimensions, specs, diagrams)\n\n"
-    "For main + neutral-background angle shots, keep a smooth visual progression of "
-    "angles around the product (no abrupt jumps between opposite sides).\n"
-    "If multiple photos look equivalent, keep their existing numeric order for "
-    "deterministic output.\n\n"
+    "IMPORTANT: Analyze each image carefully and reorder them optimally. "
+    "Do NOT simply return [1, 2, 3, ...] - that would mean you didn't analyze them.\n\n"
+    "Sort them using these priority rules (in order of importance):\n\n"
+    "1. FIRST - Main product shots (white/light background):\n"
+    "   a) Cleanest shots with minimal or no text/branding (hero shot)\n"
+    "   b) Shots with small logo or brand name visible\n"
+    "   c) Other white background angles\n"
+    "   → Within this group, prefer cleaner/simpler composition over branded\n\n"
+    "2. THEN - Packshots (solid/neutral backgrounds, different angles):\n"
+    "   → Keep smooth visual progression around the product\n\n"
+    "3. THEN - Detail shots (close-ups, textures, materials, features):\n"
+    "   → Images showing adjustment knobs, material details, etc.\n\n"
+    "4. THEN - Lifestyle photos (product in real-life context):\n"
+    "   → Product being used, with people, in environment\n\n"
+    "5. THEN - Kit photos (with box, packaging, accessories):\n\n"
+    "6. LAST - Infographic photos:\n"
+    "   → Heavy text overlays, dimensions, specs, diagrams\n"
+    "   → More text = later in sequence\n\n"
+    "Additional rules:\n"
+    "- Within any category, images with LESS text should come BEFORE images with more text\n"
+    "- Prioritize clean, professional shots over busy/crowded compositions\n"
+    "- For angle variations, create smooth visual flow (no sudden jumps)\n\n"
     "Respond with ONLY a JSON array of the photo numbers in your preferred order.\n"
     "All {n} numbers from 1 to {n} must appear exactly once.\n"
-    "Example format for {n} photos: {example}\n"
+    "Example format: {example}\n"
     "Do NOT include any explanation — just the JSON array."
 )
 
 _RANK_GENERATION_OPTIONS = {
     # Мінімізуємо випадковість генерації, щоб порядок фото був повторюваним
     # між запусками на однаковому наборі зображень.
-    "temperature": 0,
-    "top_p": 0.1,
+    # Трохи збільшено temperature та top_p для кращого аналізу зображень.
+    "temperature": 0.1,
+    "top_p": 0.3,
 }
 
 
@@ -695,12 +705,21 @@ def rank_images_with_ollama(
         images_b64.append(b64)
 
     # Будуємо приклад відповіді для промпту.
-    # Використовуємо просту ротацію ([2,3,...,n,1]) щоб показати модель рівно
-    # одну валідну перестановку — інакше модель може скопіювати [1,2,...,n].
+    # Використовуємо різні перестановки залежно від кількості зображень,
+    # щоб показати модель, що потрібно РЕАЛЬНО аналізувати, а не копіювати [1,2,3,...]
     if n == 2:
         example = [2, 1]
+    elif n == 3:
+        example = [1, 3, 2]
+    elif n == 4:
+        example = [3, 1, 2, 4]
+    elif n == 5:
+        example = [2, 4, 1, 3, 5]
+    elif n == 6:
+        example = [5, 6, 4, 1, 2, 3]
     else:
-        example = list(range(2, n + 1)) + [1]
+        # Для більших наборів - просто показуємо, що порядок має бути змінений
+        example = list(range(2, min(6, n+1))) + [1] + list(range(6, n+1))
 
     prompt = _get_rank_prompt_template().format(n=n, example=example)
     endpoint = f"{ollama_url}{OLLAMA_GENERATE_ENDPOINT}"
@@ -728,7 +747,13 @@ def rank_images_with_ollama(
         if indices is None:
             logger.warning(
                 "rank_images_with_ollama: не вдалося розпарсити відповідь. "
-                "Буде використано стандартне сортування."
+                "Відповідь: %r. Буде використано стандартне сортування.",
+                response_text[:500]
+            )
+        else:
+            logger.info(
+                "rank_images_with_ollama: успішне ранжування. Порядок: %s",
+                [i+1 for i in indices]  # Конвертуємо назад до 1-based для читабельності
             )
         return indices
 
