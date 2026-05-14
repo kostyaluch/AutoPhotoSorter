@@ -99,6 +99,43 @@ class RuleLayerTests(unittest.TestCase):
         self.assertTrue(rules["is_alternative_main_candidate"])
         self.assertEqual(rules["rejection_reason"], "text_overlay_blocks_ideal_main")
 
+    def test_gallery_and_weak_signal_rejections(self):
+        collage_rules = analyzer.apply_pre_analysis_rules({
+            "white_bg_score": 0.9,
+            "has_text": False,
+            "clip_text_overlay_score": 0.1,
+            "clip_collage_score": 0.8,
+            "clip_lifestyle_score": 0.1,
+            "clip_white_bg_score": 0.9,
+            "clip_single_product_score": 0.9,
+        })
+        self.assertTrue(collage_rules["is_gallery_candidate"])
+        self.assertEqual(collage_rules["rejection_reason"], "collage_not_ideal_main")
+
+        lifestyle_rules = analyzer.apply_pre_analysis_rules({
+            "white_bg_score": 0.8,
+            "has_text": False,
+            "clip_text_overlay_score": 0.1,
+            "clip_collage_score": 0.1,
+            "clip_lifestyle_score": 0.8,
+            "clip_white_bg_score": 0.8,
+            "clip_single_product_score": 0.8,
+        })
+        self.assertTrue(lifestyle_rules["is_gallery_candidate"])
+        self.assertEqual(lifestyle_rules["rejection_reason"], "lifestyle_not_ideal_main")
+
+        weak_rules = analyzer.apply_pre_analysis_rules({
+            "white_bg_score": 0.2,
+            "has_text": False,
+            "clip_text_overlay_score": 0.1,
+            "clip_collage_score": 0.1,
+            "clip_lifestyle_score": 0.1,
+            "clip_white_bg_score": 0.2,
+            "clip_single_product_score": 0.2,
+        })
+        self.assertTrue(weak_rules["is_gallery_candidate"])
+        self.assertEqual(weak_rules["rejection_reason"], "background_not_white_enough")
+
 
 if __name__ == "__main__":
     unittest.main()

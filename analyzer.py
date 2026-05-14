@@ -217,8 +217,15 @@ CLIP_RULE_THRESHOLDS = {
     "clip_lifestyle_high": 0.58,
     "clip_white_bg_strong": 0.60,
     "clip_single_product_strong": 0.56,
+    "clip_packaging_detail_high": 0.62,
+    "clip_level_high": 0.67,
+    "clip_level_medium": 0.45,
     "opencv_white_bg_strong": 0.60,
 }
+
+# Температура для sigmoid(logits / temperature): 10.0 стискає крайні значення
+# CLIP-логітів у більш стабільний діапазон confidence 0..1.
+CLIP_LOGIT_TEMPERATURE_SCALING = 10.0
 
 # ---------------------------------------------------------------------------
 # 1. Визначення білого фону (OpenCV)
@@ -720,7 +727,12 @@ def _parse_rank_response(text: str, n_images: int) -> list[int] | None:
     return [x - 1 for x in arr]
 
 
-def _score_to_level(score: float, high: float = 0.67, medium: float = 0.45) -> str:
+def _classify_clip_score_level(
+    score: float,
+    high: float = CLIP_RULE_THRESHOLDS["clip_level_high"],
+    medium: float = CLIP_RULE_THRESHOLDS["clip_level_medium"],
+) -> str:
+    """Перетворює числовий score у high/medium/low для коротких Ollama summary."""
     if score >= high:
         return "high"
     if score >= medium:
@@ -736,8 +748,8 @@ def _build_rank_preanalysis_block(image_summaries: list[dict] | None) -> str:
         "=== PRE-ANALYSIS SIGNALS (use as strong hints, final order is your decision) ==="
     ]
     for idx, summary in enumerate(image_summaries, start=1):
-        white_bg_level = _score_to_level(float(summary.get("clip_white_bg_score", 0.0)))
-        single_level = _score_to_level(float(summary.get("clip_single_product_score", 0.0)))
+        white_bg_level = _classify_clip_score_level(float(summary.get("clip_white_bg_score", 0.0)))
+        single_level = _classify_clip_score_level(float(summary.get("clip_single_product_score", 0.0)))
         text_overlay = "yes" if summary.get("has_text_overlay") else "no"
         collage = "yes" if float(summary.get("clip_collage_score", 0.0)) >= CLIP_RULE_THRESHOLDS["clip_collage_high"] else "no"
         lifestyle = "yes" if float(summary.get("clip_lifestyle_score", 0.0)) >= CLIP_RULE_THRESHOLDS["clip_lifestyle_high"] else "no"
@@ -916,21 +928,29 @@ def rank_images_with_ollama(
 # ---------------------------------------------------------------------------
 
 _CLIP_MODEL_CACHE: dict = {}  # {device: (model, preprocess)}
-_CLIP_PROMPT_INDEX: dict[str, tuple[int, int]] = {}
-_start = 0
-for _group_name, _group_prompts in CLIP_CONCEPT_PROMPTS.items():
-    _end = _start + len(_group_prompts)
-    _CLIP_PROMPT_INDEX[_group_name] = (_start, _end)
-    _start = _end
+
+
+def _build_clip_prompt_index() -> dict[str, tuple[int, int]]:
+    prompt_index: dict[str, tuple[int, int]] = {}
+    start = 0
+    for group_name, group_prompts in CLIP_CONCEPT_PROMPTS.items():
+        end = start + len(group_prompts)
+        prompt_index[group_name] = (start, end)
+        start = end
+    return prompt_index
+
+
+_CLIP_PROMPT_INDEX = _build_clip_prompt_index()
 _CLIP_ALL_PROMPTS = [p for prompts in CLIP_CONCEPT_PROMPTS.values() for p in prompts]
 
 # backward compatibility for GUI import
 _CLIP_TEXT_PROMPTS = _CLIP_ALL_PROMPTS
+_DEFAULT_CLIP_SIGNALS = {field: 0.0 for field in CLIP_SIGNAL_FIELD_MAP.values()}
 
 
 def get_default_clip_signals() -> dict[str, float]:
     """Повертає нульові CLIP сигнали для стабільної структури результату."""
-    return {field: 0.0 for field in CLIP_SIGNAL_FIELD_MAP.values()}
+    return _DEFAULT_CLIP_SIGNALS.copy()
 
 
 def analyze_clip_signals(image_path: str) -> dict[str, float]:
@@ -949,13 +969,19 @@ def analyze_clip_signals(image_path: str) -> dict[str, float]:
         else:
             model, preprocess = _CLIP_MODEL_CACHE[device]
 
-        image = preprocess(Image.open(image_path)).unsqueeze(0).to(device)
+        with Image.open(image_path) as pil_image:
+            image = preprocess(pil_image).unsqueeze(0).to(device)
         text_tokens = clip_module.tokenize(_CLIP_ALL_PROMPTS).to(device)
 
         with torch.no_grad():
             logits_per_image, _ = model(image, text_tokens)
             logits = logits_per_image.cpu().numpy()[0]
-            prompt_scores = 1.0 / (1.0 + np.exp(-logits / 10.0))
+            # Логіти CLIP можуть мати широкий діапазон, тому застосовуємо
+            # temperature-scaled sigmoid: sigmoid(logits / temperature),
+            # де temperature = CLIP_LOGIT_TEMPERATURE_SCALING для стабільнішої шкали score 0..1.
+            prompt_scores = 1.0 / (
+                1.0 + np.exp(-logits / CLIP_LOGIT_TEMPERATURE_SCALING)
+            )
 
         signals = get_default_clip_signals()
         for group_name, field_name in CLIP_SIGNAL_FIELD_MAP.items():
@@ -1061,7 +1087,7 @@ def classify_with_clip(image_path: str) -> str | None:
         return CATEGORY_INFOGRAPHIC
     if lifestyle:
         return CATEGORY_LIFESTYLE
-    if packaging_detail >= 0.62 and not white_bg:
+    if packaging_detail >= CLIP_RULE_THRESHOLDS["clip_packaging_detail_high"] and not white_bg:
         return CATEGORY_DETAIL
     if white_bg and single_product and not text_overlay:
         return CATEGORY_MAIN
@@ -1096,11 +1122,11 @@ def classify_image(image_path: str,
     """
     ai_category: str | None = None
     method = "opencv"
-    clip_signals = clip_signals or get_default_clip_signals()
+    resolved_clip_signals = clip_signals or get_default_clip_signals()
     pre_rules = apply_pre_analysis_rules({
         "white_bg_score": white_bg_score,
         "has_text": has_text,
-        **clip_signals,
+        **resolved_clip_signals,
     })
 
     # --- Спроба AI класифікації ---
@@ -1126,6 +1152,8 @@ def classify_image(image_path: str,
         # Якщо AI каже "main", але OCR виявив будь-який текст — понижуємо до packshot.
         # Наявність тексту, плашок або водяних знаків є блокуючою умовою для
         # "ідеального головного фото". Такі фото класифікуються як альтернативні.
+        # Пріоритет має pre_rules["has_text_overlay"], бо він поєднує OCR + CLIP
+        # (а не лише сирий OCR прапорець has_text).
         if ai_category == CATEGORY_MAIN and pre_rules["has_text_overlay"]:
             ai_category = CATEGORY_PACKSHOT
         return ai_category, 1.0, method
@@ -1140,9 +1168,9 @@ def classify_image(image_path: str,
         else:
             return CATEGORY_PACKSHOT, 0.5, method
 
-    if pre_rules["is_gallery_candidate"] and clip_signals["clip_collage_score"] >= CLIP_RULE_THRESHOLDS["clip_collage_high"]:
+    if pre_rules["is_gallery_candidate"] and resolved_clip_signals["clip_collage_score"] >= CLIP_RULE_THRESHOLDS["clip_collage_high"]:
         return CATEGORY_INFOGRAPHIC, 0.6, method
-    if pre_rules["is_gallery_candidate"] and clip_signals["clip_lifestyle_score"] >= CLIP_RULE_THRESHOLDS["clip_lifestyle_high"]:
+    if pre_rules["is_gallery_candidate"] and resolved_clip_signals["clip_lifestyle_score"] >= CLIP_RULE_THRESHOLDS["clip_lifestyle_high"]:
         return CATEGORY_LIFESTYLE, 0.6, method
 
     # Налаштування порогів:

@@ -4,7 +4,7 @@ from unittest.mock import patch
 import sorter
 
 
-class ProcessFolderRuleStatusTests(unittest.TestCase):
+class ProcessFolderAlternativeMainTests(unittest.TestCase):
     @patch.object(sorter, "get_images_in_folder", return_value=["/x/a.jpg", "/x/b.jpg"])
     @patch.object(sorter, "sort_images")
     @patch.object(sorter, "analyze_image")

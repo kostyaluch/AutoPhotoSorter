@@ -112,6 +112,30 @@ def find_best_fallback(images_data: list[dict]) -> dict | None:
     return max(valid, key=lambda x: x.get("white_bg_score", 0.0))
 
 
+def update_main_status_from_first_image(result: dict, first_photo: dict | None) -> None:
+    """Update main-photo status flags from the first item in final ordering.
+
+    If first_photo is None, all flags remain reset (False/None).
+    """
+    result["has_ideal_main"] = False
+    result["has_alternative_main"] = False
+    result["alternative_main_image"] = None
+    result["fallback_used"] = False
+    result["fallback_image"] = None
+
+    if not first_photo:
+        return
+
+    if first_photo.get("is_ideal_main_eligible", False):
+        result["has_ideal_main"] = True
+    elif first_photo.get("is_alternative_main_candidate", False):
+        result["has_alternative_main"] = True
+        result["alternative_main_image"] = first_photo
+    else:
+        result["fallback_used"] = True
+        result["fallback_image"] = first_photo
+
+
 # ---------------------------------------------------------------------------
 # Обробка однієї папки
 # ---------------------------------------------------------------------------
@@ -258,27 +282,6 @@ def process_folder(folder_path: str,
                         "process_folder(%s): Ollama ранжування застосовано",
                         os.path.basename(folder_path),
                     )
-
-                    # Оновлюємо статус головного фото на основі вибору Ollama:
-                    # перевіряємо перше фото у відсортованому Ollama списку
-                    first_photo = result["sorted_images"][0] if result["sorted_images"] else None
-                    if first_photo:
-                        # Скидаємо попередні прапорці і визначаємо наново
-                        result["has_ideal_main"] = False
-                        result["has_alternative_main"] = False
-                        result["alternative_main_image"] = None
-                        result["fallback_used"] = False
-                        result["fallback_image"] = None
-
-                        if first_photo.get("is_ideal_main_eligible", False):
-                            result["has_ideal_main"] = True
-                        elif first_photo.get("is_alternative_main_candidate", False):
-                            result["has_alternative_main"] = True
-                            result["alternative_main_image"] = first_photo
-                        else:
-                            result["fallback_used"] = True
-                            result["fallback_image"] = first_photo
-                        # else: Ollama помістила нейтральне фото на перше місце
                 else:
                     logger.info(
                         "process_folder(%s): Ollama ранжування не вдалося — "
@@ -293,6 +296,9 @@ def process_folder(folder_path: str,
                     n,
                     OLLAMA_MAX_IMAGES_PER_RANK,
                 )
+
+            if result.get("sorted_images"):
+                update_main_status_from_first_image(result, result["sorted_images"][0])
 
     except Exception as exc:
         result["error"] = str(exc)
