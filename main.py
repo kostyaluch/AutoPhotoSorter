@@ -595,10 +595,10 @@ class AutoPhotoSorterApp:
         
         # Додаємо контекстне меню та keyboard shortcuts
         self._add_text_context_menu(classify_text)
-        classify_text.bind('<Control-c>', lambda e: self._copy_text_to_clipboard(classify_text) or "break")
-        classify_text.bind('<Control-v>', lambda e: self._paste_text_from_clipboard(classify_text) or "break")
-        classify_text.bind('<Control-x>', lambda e: self._cut_text_to_clipboard(classify_text) or "break")
-        classify_text.bind('<Control-a>', lambda e: (classify_text.tag_add(tk.SEL, "1.0", tk.END), "break")[1])
+        classify_text.bind('<Control-C>', lambda e: self._copy_text_to_clipboard(classify_text) or "break")
+        classify_text.bind('<Control-V>', lambda e: self._paste_text_from_clipboard(classify_text) or "break")
+        classify_text.bind('<Control-X>', lambda e: self._cut_text_to_clipboard(classify_text) or "break")
+        classify_text.bind('<Control-A>', lambda e: classify_text.tag_add(tk.SEL, "1.0", tk.END) or "break")
         
         # Промт ранжування
         rank_label = ttk.Label(
@@ -621,10 +621,10 @@ class AutoPhotoSorterApp:
         
         # Додаємо контекстне меню та keyboard shortcuts
         self._add_text_context_menu(rank_text)
-        rank_text.bind('<Control-c>', lambda e: self._copy_text_to_clipboard(rank_text) or "break")
-        rank_text.bind('<Control-v>', lambda e: self._paste_text_from_clipboard(rank_text) or "break")
-        rank_text.bind('<Control-x>', lambda e: self._cut_text_to_clipboard(rank_text) or "break")
-        rank_text.bind('<Control-a>', lambda e: (rank_text.tag_add(tk.SEL, "1.0", tk.END), "break")[1])
+        rank_text.bind('<Control-C>', lambda e: self._copy_text_to_clipboard(rank_text) or "break")
+        rank_text.bind('<Control-V>', lambda e: self._paste_text_from_clipboard(rank_text) or "break")
+        rank_text.bind('<Control-X>', lambda e: self._cut_text_to_clipboard(rank_text) or "break")
+        rank_text.bind('<Control-A>', lambda e: rank_text.tag_add(tk.SEL, "1.0", tk.END) or "break")
         
         # Кнопки
         btn_frame = ttk.Frame(frame)
