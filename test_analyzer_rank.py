@@ -9,7 +9,7 @@ class _FakeResponse:
         self._response_text = response_text
 
     def raise_for_status(self):
-        return None
+        pass
 
     def json(self):
         return {"response": self._response_text}
